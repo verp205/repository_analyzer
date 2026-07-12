@@ -1,0 +1,41 @@
+package com.ivan_naumenko.repository_analyzer.service;
+
+import com.ivan_naumenko.repository_analyzer.model.AnalysisTask;
+import com.ivan_naumenko.repository_analyzer.model.AnalysisTaskStatus;
+import com.ivan_naumenko.repository_analyzer.repository.AnalysisTaskRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.util.Optional;
+
+@Service
+@RequiredArgsConstructor
+public class AnalysisTaskService {
+
+    private final AnalysisTaskRepository repository;
+
+    public AnalysisTask createOrGet(String repositoryUrl, String branch) {
+
+        Optional<AnalysisTask> task = repository.findByRepositoryUrlAndBranch(repositoryUrl, branch);
+
+        if (task.isPresent()) {
+            return task.get();
+        } else {
+
+            AnalysisTask newTask = new AnalysisTask();
+
+            newTask.setStatus(AnalysisTaskStatus.NEW);
+            newTask.setRepositoryUrl(repositoryUrl);
+            newTask.setBranch(branch);
+
+            LocalDateTime now = LocalDateTime.now();
+
+            newTask.setCreatedAt(now);
+            newTask.setUpdatedAt(now);
+
+            return repository.save(newTask);
+        }
+    }
+
+}
