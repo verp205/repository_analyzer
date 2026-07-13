@@ -12,6 +12,11 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -93,6 +98,40 @@ class GitServiceTest {
         assertEquals("Test User", newestCommit.authorName());
         assertEquals("test@example.com", newestCommit.authorMail());
         assertNotNull(newestCommit.committedAt());
+    }
+
+    @Test
+    void serializesConcurrentCloneRequestsForSameRepository() throws Exception {
+        Path sourceDirectory = tempDirectory.resolve("concurrent-source");
+        Path clonesDirectory = tempDirectory.resolve("concurrent-clones");
+        createSourceRepository(sourceDirectory);
+
+        GitService gitService = new GitService(new DirectoryProperties(clonesDirectory));
+        String repositoryUrl = sourceDirectory.toUri().toString();
+        ExecutorService callers = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try {
+            Future<Path> first = callers.submit(() -> {
+                start.await();
+                return gitService.cloneOrUpdateRepository(repositoryUrl, "main");
+            });
+            Future<Path> second = callers.submit(() -> {
+                start.await();
+                return gitService.cloneOrUpdateRepository(repositoryUrl, "main");
+            });
+
+            start.countDown();
+
+            Path firstResult = first.get(10, TimeUnit.SECONDS);
+            Path secondResult = second.get(10, TimeUnit.SECONDS);
+
+            assertEquals(firstResult, secondResult);
+            assertTrue(Files.isDirectory(firstResult.resolve(".git")));
+        } finally {
+            callers.shutdownNow();
+            assertTrue(callers.awaitTermination(5, TimeUnit.SECONDS));
+        }
     }
 
     private void createSourceRepository(Path sourceDirectory) throws Exception {
