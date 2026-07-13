@@ -1,6 +1,6 @@
 package com.ivan_naumenko.repository_analyzer.git;
 
-import com.ivan_naumenko.repository_analyzer.config.directory.DirectoryProperties;
+import com.ivan_naumenko.repository_analyzer.git.config.DirectoryProperties;
 import com.ivan_naumenko.repository_analyzer.git.exception.RepositorySyncException;
 import com.ivan_naumenko.repository_analyzer.git.model.GitCommit;
 import com.ivan_naumenko.repository_analyzer.git.service.GitService;

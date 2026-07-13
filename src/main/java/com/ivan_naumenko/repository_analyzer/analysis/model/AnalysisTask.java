@@ -1,4 +1,4 @@
-package com.ivan_naumenko.repository_analyzer.model;
+package com.ivan_naumenko.repository_analyzer.analysis.model;
 
 import jakarta.persistence.*;
 import lombok.*;

@@ -1,7 +1,7 @@
-package com.ivan_naumenko.repository_analyzer.mapper;
+package com.ivan_naumenko.repository_analyzer.analysis.mapper;
 
-import com.ivan_naumenko.repository_analyzer.api.dto.AnalysisTaskResponse;
-import com.ivan_naumenko.repository_analyzer.model.AnalysisTask;
+import com.ivan_naumenko.repository_analyzer.analysis.dto.AnalysisTaskResponse;
+import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
 import org.springframework.stereotype.Component;
 
 @Component

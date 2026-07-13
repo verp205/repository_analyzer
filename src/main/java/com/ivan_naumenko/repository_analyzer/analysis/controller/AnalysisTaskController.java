@@ -1,10 +1,10 @@
-package com.ivan_naumenko.repository_analyzer.api.controller;
+package com.ivan_naumenko.repository_analyzer.analysis.controller;
 
-import com.ivan_naumenko.repository_analyzer.api.dto.AnalysisTaskResponse;
-import com.ivan_naumenko.repository_analyzer.api.dto.CreateAnalysisTaskRequest;
-import com.ivan_naumenko.repository_analyzer.mapper.TaskMapper;
-import com.ivan_naumenko.repository_analyzer.model.AnalysisTask;
-import com.ivan_naumenko.repository_analyzer.service.AnalysisTaskService;
+import com.ivan_naumenko.repository_analyzer.analysis.dto.AnalysisTaskResponse;
+import com.ivan_naumenko.repository_analyzer.analysis.dto.CreateAnalysisTaskRequest;
+import com.ivan_naumenko.repository_analyzer.analysis.mapper.TaskMapper;
+import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
+import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskService;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;

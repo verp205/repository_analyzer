@@ -1,6 +1,6 @@
-package com.ivan_naumenko.repository_analyzer.api.dto;
+package com.ivan_naumenko.repository_analyzer.analysis.dto;
 
-import com.ivan_naumenko.repository_analyzer.model.AnalysisTaskStatus;
+import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;

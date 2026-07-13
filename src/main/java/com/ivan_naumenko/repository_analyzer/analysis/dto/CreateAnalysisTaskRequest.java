@@ -1,4 +1,4 @@
-package com.ivan_naumenko.repository_analyzer.api.dto;
+package com.ivan_naumenko.repository_analyzer.analysis.dto;
 
 import jakarta.validation.constraints.NotBlank;
 

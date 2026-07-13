@@ -1,8 +1,8 @@
-package com.ivan_naumenko.repository_analyzer.service;
+package com.ivan_naumenko.repository_analyzer.analysis.service;
 
-import com.ivan_naumenko.repository_analyzer.model.AnalysisTask;
-import com.ivan_naumenko.repository_analyzer.model.AnalysisTaskStatus;
-import com.ivan_naumenko.repository_analyzer.repository.AnalysisTaskRepository;
+import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
+import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
+import com.ivan_naumenko.repository_analyzer.analysis.repository.AnalysisTaskRepository;
 
 import lombok.RequiredArgsConstructor;
 

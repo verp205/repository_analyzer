@@ -1,4 +1,4 @@
-package com.ivan_naumenko.repository_analyzer.config.directory;
+package com.ivan_naumenko.repository_analyzer.git.config;
 
 import jakarta.validation.constraints.NotNull;
 import org.springframework.boot.context.properties.ConfigurationProperties;

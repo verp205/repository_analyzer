@@ -1,4 +1,4 @@
-package com.ivan_naumenko.repository_analyzer.model;
+package com.ivan_naumenko.repository_analyzer.analysis.model;
 
 public enum AnalysisTaskStatus {
     NEW,

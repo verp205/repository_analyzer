@@ -1,6 +1,6 @@
 package com.ivan_naumenko.repository_analyzer.git.service;
 
-import com.ivan_naumenko.repository_analyzer.config.directory.DirectoryProperties;
+import com.ivan_naumenko.repository_analyzer.git.config.DirectoryProperties;
 import com.ivan_naumenko.repository_analyzer.git.exception.BranchNotFoundException;
 import com.ivan_naumenko.repository_analyzer.git.exception.RepositoryNotFoundException;
 import com.ivan_naumenko.repository_analyzer.git.exception.RepositoryReadException;
