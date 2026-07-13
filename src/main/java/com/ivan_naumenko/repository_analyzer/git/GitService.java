@@ -3,6 +3,7 @@ package com.ivan_naumenko.repository_analyzer.git;
 import com.ivan_naumenko.repository_analyzer.config.directory.DirectoryProperties;
 import lombok.RequiredArgsConstructor;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.springframework.stereotype.Service;
 
@@ -20,7 +21,7 @@ public class GitService {
 
     private final DirectoryProperties directoryProperties;
 
-    public Path cloneRepository(String repositoryUrl, String branch) throws IOException, GitAPIException {
+    public Path cloneOrUpdateRepository(String repositoryUrl, String branch) throws IOException, GitAPIException {
 
         Path repositoriesRoot = directoryProperties.path()
                 .toAbsolutePath()
@@ -31,6 +32,23 @@ public class GitService {
         Path repositoryDirectory = repositoriesRoot.resolve(repositoryKey(repositoryUrl, branch));
 
         if (Files.isDirectory(repositoryDirectory.resolve(".git"))) {
+
+           try (Git git = Git.open(repositoryDirectory.toFile())) {
+
+               git.fetch()
+                       .setRemote("origin")
+                       .call();
+
+               git.checkout()
+                       .setName(branch)
+                       .call();
+
+               git.reset()
+                       .setMode(ResetCommand.ResetType.HARD)
+                       .setRef("origin/" + branch)
+                       .call();
+           }
+
             return repositoryDirectory;
         }
 
@@ -44,6 +62,7 @@ public class GitService {
     }
 
     private String repositoryKey(String repositoryUrl, String branch) {
+
         String source = repositoryUrl.trim() + "\n" + branch.trim();
 
         try {
