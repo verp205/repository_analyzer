@@ -1,4 +1,4 @@
-package com.ivan_naumenko.repository_analyzer.config;
+package com.ivan_naumenko.repository_analyzer.config.analysis;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;

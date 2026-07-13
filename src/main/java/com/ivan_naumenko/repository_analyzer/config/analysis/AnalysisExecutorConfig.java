@@ -1,4 +1,4 @@
-package com.ivan_naumenko.repository_analyzer.config;
+package com.ivan_naumenko.repository_analyzer.config.analysis;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
