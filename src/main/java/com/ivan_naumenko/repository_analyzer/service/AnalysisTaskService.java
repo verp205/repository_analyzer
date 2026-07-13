@@ -3,7 +3,10 @@ package com.ivan_naumenko.repository_analyzer.service;
 import com.ivan_naumenko.repository_analyzer.model.AnalysisTask;
 import com.ivan_naumenko.repository_analyzer.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.repository.AnalysisTaskRepository;
+
 import lombok.RequiredArgsConstructor;
+
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -34,8 +37,12 @@ public class AnalysisTaskService {
             newTask.setCreatedAt(now);
             newTask.setUpdatedAt(now);
 
-            return repository.save(newTask);
+            try {
+                return repository.saveAndFlush(newTask);
+            } catch (DataAccessException e) {
+                return repository.findByRepositoryUrlAndBranch(repositoryUrl, branch)
+                        .orElseThrow(() -> e);
+            }
         }
     }
-
 }
