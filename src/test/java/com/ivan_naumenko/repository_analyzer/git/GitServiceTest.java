@@ -1,6 +1,9 @@
 package com.ivan_naumenko.repository_analyzer.git;
 
 import com.ivan_naumenko.repository_analyzer.config.directory.DirectoryProperties;
+import com.ivan_naumenko.repository_analyzer.git.exception.RepositorySyncException;
+import com.ivan_naumenko.repository_analyzer.git.model.GitCommit;
+import com.ivan_naumenko.repository_analyzer.git.service.GitService;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.junit.jupiter.api.Test;
@@ -8,8 +11,11 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GitServiceTest {
@@ -18,7 +24,7 @@ class GitServiceTest {
     Path tempDirectory;
 
     @Test
-    void clonesRepositoryAndUpdatesExistingCopy() throws Exception {
+    void clonesRepositoryAndUpdatesExistingCopy() throws Exception, RepositorySyncException {
         Path sourceDirectory = tempDirectory.resolve("source");
         Path clonesDirectory = tempDirectory.resolve("clones");
         createSourceRepository(sourceDirectory);
@@ -53,6 +59,40 @@ class GitServiceTest {
             assertEquals(2, countCommits(updatedGit));
             assertEquals("Second commit", updatedGit.log().call().iterator().next().getFullMessage());
         }
+    }
+
+    @Test
+    void readsCommitHistoryWithAuthorsAndParentHashes() throws Exception, RepositorySyncException {
+        Path sourceDirectory = tempDirectory.resolve("history-source");
+        Path clonesDirectory = tempDirectory.resolve("history-clones");
+        createSourceRepository(sourceDirectory);
+        addSecondCommit(sourceDirectory);
+
+        DirectoryProperties properties = new DirectoryProperties(clonesDirectory);
+        GitService gitService = new GitService(properties);
+        String repositoryUrl = sourceDirectory.toUri().toString();
+        gitService.cloneOrUpdateRepository(repositoryUrl, "main");
+
+        List<GitCommit> history = gitService.readHistory(repositoryUrl, "main");
+
+        assertEquals(2, history.size());
+
+        GitCommit newestCommit = history.get(0);
+        GitCommit rootCommit = history.get(1);
+
+        assertEquals("Second commit", newestCommit.message());
+        assertEquals("Initial commit", rootCommit.message());
+        assertEquals(40, newestCommit.commitHash().length());
+        assertEquals(40, rootCommit.commitHash().length());
+        assertFalse(newestCommit.commitHash().isBlank());
+        assertFalse(rootCommit.commitHash().isBlank());
+
+        assertEquals(List.of(rootCommit.commitHash()), newestCommit.parentHashes());
+        assertTrue(rootCommit.parentHashes().isEmpty());
+
+        assertEquals("Test User", newestCommit.authorName());
+        assertEquals("test@example.com", newestCommit.authorMail());
+        assertNotNull(newestCommit.committedAt());
     }
 
     private void createSourceRepository(Path sourceDirectory) throws Exception {
