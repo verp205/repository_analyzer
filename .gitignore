@@ -37,3 +37,7 @@ data/*.db-*
 
 ### VS Code ###
 .vscode/
+
+data/repositories/
+
+.DS_Store
