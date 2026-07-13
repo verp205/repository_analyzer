@@ -6,7 +6,7 @@ import com.ivan_naumenko.repository_analyzer.analysis.repository.AnalysisTaskRep
 
 import lombok.RequiredArgsConstructor;
 
-import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -19,8 +19,13 @@ public class AnalysisTaskService {
     private final AnalysisTaskRepository repository;
 
     public AnalysisTask createOrGet(String repositoryUrl, String branch) {
+        String normalizedRepositoryUrl = normalize(repositoryUrl, "URL репозитория");
+        String normalizedBranch = normalize(branch, "Название ветки");
 
-        Optional<AnalysisTask> task = repository.findByRepositoryUrlAndBranch(repositoryUrl, branch);
+        Optional<AnalysisTask> task = repository.findByRepositoryUrlAndBranch(
+                normalizedRepositoryUrl,
+                normalizedBranch
+        );
 
         if (task.isPresent()) {
             return task.get();
@@ -29,8 +34,8 @@ public class AnalysisTaskService {
             AnalysisTask newTask = new AnalysisTask();
 
             newTask.setStatus(AnalysisTaskStatus.NEW);
-            newTask.setRepositoryUrl(repositoryUrl);
-            newTask.setBranch(branch);
+            newTask.setRepositoryUrl(normalizedRepositoryUrl);
+            newTask.setBranch(normalizedBranch);
 
             LocalDateTime now = LocalDateTime.now();
 
@@ -39,10 +44,21 @@ public class AnalysisTaskService {
 
             try {
                 return repository.saveAndFlush(newTask);
-            } catch (DataAccessException e) {
-                return repository.findByRepositoryUrlAndBranch(repositoryUrl, branch)
-                        .orElseThrow(() -> e);
+            } catch (DataIntegrityViolationException exception) {
+                return repository.findByRepositoryUrlAndBranch(
+                                normalizedRepositoryUrl,
+                                normalizedBranch
+                        )
+                        .orElseThrow(() -> exception);
             }
         }
+    }
+
+    private String normalize(String value, String fieldName) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(fieldName + " не должно быть пустым");
+        }
+
+        return value.trim();
     }
 }

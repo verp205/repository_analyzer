@@ -27,34 +27,54 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.IntStream;
 
 @RequiredArgsConstructor
 @Service
 public class GitService {
 
     private static final String REMOTE_NAME = "origin";
+    private static final int REPOSITORY_LOCK_COUNT = 64;
 
     private final DirectoryProperties directoryProperties;
+    private final Lock[] repositoryLocks = IntStream
+            .range(0, REPOSITORY_LOCK_COUNT)
+            .mapToObj(ignored -> (Lock) new ReentrantLock())
+            .toArray(Lock[]::new);
 
     public Path cloneOrUpdateRepository(
             String repositoryUrl,
             String branch
     ) throws RepositorySyncException {
         validateArguments(repositoryUrl, branch);
+        String normalizedRepositoryUrl = repositoryUrl.trim();
+        String normalizedBranch = branch.trim();
+        String repositoryKey = repositoryKey(
+                normalizedRepositoryUrl,
+                normalizedBranch
+        );
+        Lock repositoryLock = lockFor(repositoryKey);
 
         Path repositoriesRoot = getRepositoriesRoot();
+        repositoryLock.lock();
 
         try {
             Files.createDirectories(repositoriesRoot);
 
             Path repositoryDirectory = repositoriesRoot.resolve(
-                    repositoryKey(repositoryUrl, branch)
+                    repositoryKey
             );
 
             if (Files.isDirectory(repositoryDirectory.resolve(".git"))) {
-                updateRepository(repositoryDirectory, branch);
+                updateRepository(repositoryDirectory, normalizedBranch);
             } else {
-                cloneRepository(repositoryUrl, branch, repositoryDirectory);
+                cloneRepository(
+                        normalizedRepositoryUrl,
+                        normalizedBranch,
+                        repositoryDirectory
+                );
             }
 
             return repositoryDirectory;
@@ -62,11 +82,13 @@ public class GitService {
         } catch (IOException | GitAPIException exception) {
             throw new RepositorySyncException(
                     "Не удалось клонировать или обновить репозиторий: "
-                            + repositoryUrl
+                            + normalizedRepositoryUrl
                             + ", ветка: "
-                            + branch,
+                            + normalizedBranch,
                     exception
             );
+        } finally {
+            repositoryLock.unlock();
         }
     }
 
@@ -75,10 +97,27 @@ public class GitService {
             String branch
     ) {
         validateArguments(repositoryUrl, branch);
-
-        Path localRepository = getRepositoriesRoot().resolve(
-                repositoryKey(repositoryUrl, branch)
+        String normalizedRepositoryUrl = repositoryUrl.trim();
+        String normalizedBranch = branch.trim();
+        String repositoryKey = repositoryKey(
+                normalizedRepositoryUrl,
+                normalizedBranch
         );
+        Lock repositoryLock = lockFor(repositoryKey);
+        repositoryLock.lock();
+
+        try {
+            return readHistoryLocked(repositoryKey, normalizedBranch);
+        } finally {
+            repositoryLock.unlock();
+        }
+    }
+
+    private List<GitCommit> readHistoryLocked(
+            String repositoryKey,
+            String branch
+    ) {
+        Path localRepository = getRepositoriesRoot().resolve(repositoryKey);
 
         if (!Files.isDirectory(localRepository.resolve(".git"))) {
             throw new RepositoryNotFoundException(
@@ -212,6 +251,14 @@ public class GitService {
         return directoryProperties.path()
                 .toAbsolutePath()
                 .normalize();
+    }
+
+    private Lock lockFor(String repositoryKey) {
+        int lockIndex = Math.floorMod(
+                repositoryKey.hashCode(),
+                repositoryLocks.length
+        );
+        return repositoryLocks[lockIndex];
     }
 
     private String repositoryKey(

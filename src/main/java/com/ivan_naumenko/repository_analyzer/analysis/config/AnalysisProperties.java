@@ -10,6 +10,9 @@ import org.springframework.validation.annotation.Validated;
 public record AnalysisProperties(
         @Min(1)
         @Max(10)
-        int maxThreads
+        int maxThreads,
+
+        @Min(1)
+        int queueCapacity
 ) {
 }
