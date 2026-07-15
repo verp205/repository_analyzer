@@ -1,5 +1,6 @@
 package com.ivan_naumenko.repository_analyzer.analysis.service;
 
+import com.ivan_naumenko.repository_analyzer.analysis.exception.AnalysisTaskNotFoundException;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.analysis.repository.AnalysisTaskRepository;
@@ -8,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -19,6 +21,7 @@ public class AnalysisTaskService {
     private final AnalysisTaskRepository repository;
 
     public AnalysisTask createOrGet(String repositoryUrl, String branch) {
+
         String normalizedRepositoryUrl = normalize(repositoryUrl, "URL репозитория");
         String normalizedBranch = normalize(branch, "Название ветки");
 
@@ -52,6 +55,22 @@ public class AnalysisTaskService {
                         .orElseThrow(() -> exception);
             }
         }
+    }
+
+    public AnalysisTask getById(Integer id) {
+
+        return repository.findById(id)
+                .orElseThrow(() -> new AnalysisTaskNotFoundException("Задача не найдена"));
+    }
+
+    @Transactional
+    public boolean updateStatusIfCurrent(Integer taskId,
+                                         AnalysisTaskStatus expectedStatus,
+                                         AnalysisTaskStatus newStatus) {
+
+        int updatedRows = repository.updateStatusIfCurrent(taskId, expectedStatus, newStatus, LocalDateTime.now());
+
+        return updatedRows == 1;
     }
 
     private String normalize(String value, String fieldName) {
