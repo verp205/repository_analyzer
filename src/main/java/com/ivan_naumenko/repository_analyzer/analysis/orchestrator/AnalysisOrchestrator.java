@@ -3,6 +3,7 @@ package com.ivan_naumenko.repository_analyzer.analysis.orchestrator;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskService;
+import com.ivan_naumenko.repository_analyzer.commit.service.CommitDiscoveryService;
 import com.ivan_naumenko.repository_analyzer.git.model.GitCommit;
 import com.ivan_naumenko.repository_analyzer.git.service.GitService;
 import org.slf4j.Logger;
@@ -24,16 +25,19 @@ public class AnalysisOrchestrator {
 
     private final AnalysisTaskService analysisTaskService;
     private final GitService gitService;
+    private final CommitDiscoveryService commitDiscoveryService;
     private final ExecutorService analysisExecutor;
 
     public AnalysisOrchestrator(
             AnalysisTaskService analysisTaskService,
             GitService gitService,
+            CommitDiscoveryService commitDiscoveryService,
             @Qualifier("analysisExecutor")
             ExecutorService analysisExecutor
     ) {
         this.analysisTaskService = analysisTaskService;
         this.gitService = gitService;
+        this.commitDiscoveryService = commitDiscoveryService;
         this.analysisExecutor = analysisExecutor;
     }
 
@@ -92,10 +96,16 @@ public class AnalysisOrchestrator {
                     task.getBranch()
             );
 
-            log.info(
-                    "Для задачи {} обнаружено {} коммитов",
+            int savedCommits = commitDiscoveryService.saveDiscoveredCommits(
                     taskId,
-                    commits.size()
+                    commits
+            );
+
+            log.info(
+                    "Для задачи {} обнаружено {} коммитов, новых сохранено {}",
+                    taskId,
+                    commits.size(),
+                    savedCommits
             );
 
             boolean processingStarted = analysisTaskService.updateStatusIfCurrent(

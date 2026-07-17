@@ -3,6 +3,7 @@ package com.ivan_naumenko.repository_analyzer.analysis.orchestrator;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskService;
+import com.ivan_naumenko.repository_analyzer.commit.service.CommitDiscoveryService;
 import com.ivan_naumenko.repository_analyzer.git.service.GitService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,6 +43,9 @@ class AnalysisOrchestratorTest {
     private GitService gitService;
 
     @Mock
+    private CommitDiscoveryService commitDiscoveryService;
+
+    @Mock
     private ExecutorService analysisExecutor;
 
     private AnalysisOrchestrator orchestrator;
@@ -51,6 +55,7 @@ class AnalysisOrchestratorTest {
         orchestrator = new AnalysisOrchestrator(
                 analysisTaskService,
                 gitService,
+                commitDiscoveryService,
                 analysisExecutor
         );
     }
@@ -73,6 +78,8 @@ class AnalysisOrchestratorTest {
         )).thenReturn(true);
         when(gitService.readHistory(REPOSITORY_URL, BRANCH))
                 .thenReturn(List.of());
+        when(commitDiscoveryService.saveDiscoveredCommits(TASK_ID, List.of()))
+                .thenReturn(0);
         when(analysisTaskService.updateStatusIfCurrent(
                 TASK_ID,
                 AnalysisTaskStatus.DISCOVERING_COMMITS,
@@ -85,6 +92,7 @@ class AnalysisOrchestratorTest {
         assertTrue(started);
         verify(gitService).cloneOrUpdateRepository(REPOSITORY_URL, BRANCH);
         verify(gitService).readHistory(REPOSITORY_URL, BRANCH);
+        verify(commitDiscoveryService).saveDiscoveredCommits(TASK_ID, List.of());
         verify(analysisTaskService).updateStatusIfCurrent(
                 TASK_ID,
                 AnalysisTaskStatus.DISCOVERING_COMMITS,
