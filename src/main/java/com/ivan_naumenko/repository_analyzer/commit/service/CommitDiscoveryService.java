@@ -2,8 +2,9 @@ package com.ivan_naumenko.repository_analyzer.commit.service;
 
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskService;
+import com.ivan_naumenko.repository_analyzer.commit.mapper.CommitMapper;
 import com.ivan_naumenko.repository_analyzer.commit.model.CommitParent;
-import com.ivan_naumenko.repository_analyzer.commit.model.CommitProcessingStatus;
+import com.ivan_naumenko.repository_analyzer.commit.model.ParentKey;
 import com.ivan_naumenko.repository_analyzer.commit.model.RepositoryCommit;
 import com.ivan_naumenko.repository_analyzer.commit.repository.CommitParentRepository;
 import com.ivan_naumenko.repository_analyzer.commit.repository.RepositoryCommitRepository;
@@ -28,6 +29,7 @@ public class CommitDiscoveryService {
     private final AnalysisTaskService analysisTaskService;
     private final RepositoryCommitRepository commitRepository;
     private final CommitParentRepository parentRepository;
+    private final CommitMapper commitMapper;
 
     @Transactional
     public int saveDiscoveredCommits(
@@ -48,7 +50,7 @@ public class CommitDiscoveryService {
 
         for (GitCommit gitCommit : discoveredCommits) {
             if (knownHashes.add(gitCommit.commitHash())) {
-                newCommits.add(toEntity(task, gitCommit, now));
+                newCommits.add(commitMapper.toEntity(task, gitCommit, now));
             }
         }
 
@@ -72,25 +74,6 @@ public class CommitDiscoveryService {
         }
 
         return commitsByHash;
-    }
-
-    private RepositoryCommit toEntity(
-            AnalysisTask task,
-            GitCommit gitCommit,
-            LocalDateTime now
-    ) {
-        RepositoryCommit commit = new RepositoryCommit();
-        commit.setAnalysisTask(task);
-        commit.setCommitHash(gitCommit.commitHash());
-        commit.setAuthorName(gitCommit.authorName());
-        commit.setAuthorEmail(gitCommit.authorMail());
-        commit.setCommittedAt(gitCommit.committedAt());
-        commit.setMessage(gitCommit.message());
-        commit.setProcessingStatus(CommitProcessingStatus.NEW);
-        commit.setAttemptCount(0);
-        commit.setCreatedAt(now);
-        commit.setUpdatedAt(now);
-        return commit;
     }
 
     private void saveMissingParents(
@@ -153,8 +136,5 @@ public class CommitDiscoveryService {
         }
 
         return parents;
-    }
-
-    private record ParentKey(Integer childCommitId, Integer position) {
     }
 }
