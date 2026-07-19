@@ -1,5 +1,6 @@
 package com.ivan_naumenko.repository_analyzer.commit.worker;
 
+import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisCompletionService;
 import com.ivan_naumenko.repository_analyzer.commit.service.CommitClaimService;
 import com.ivan_naumenko.repository_analyzer.commit.service.CommitProcessor;
 import org.junit.jupiter.api.Test;
@@ -25,11 +26,15 @@ class CommitWorkerFactoryTest {
     @Mock
     private CommitProcessor commitProcessor;
 
+    @Mock
+    private AnalysisCompletionService analysisCompletionService;
+
     @Test
     void createsLazyWorkerThatProcessesCommitsUntilQueueIsEmpty() {
         CommitWorkerFactory factory = new CommitWorkerFactory(
                 commitClaimService,
-                commitProcessor
+                commitProcessor,
+                analysisCompletionService
         );
         when(commitClaimService.claimRandomCommit(TASK_ID)).thenReturn(
                 Optional.of(101),
@@ -39,16 +44,26 @@ class CommitWorkerFactoryTest {
 
         Runnable worker = factory.create(TASK_ID);
 
-        verifyNoInteractions(commitClaimService, commitProcessor);
+        verifyNoInteractions(
+                commitClaimService,
+                commitProcessor,
+                analysisCompletionService
+        );
 
         worker.run();
 
-        InOrder order = inOrder(commitClaimService, commitProcessor);
+        InOrder order = inOrder(
+                commitClaimService,
+                commitProcessor,
+                analysisCompletionService
+        );
         order.verify(commitClaimService).claimRandomCommit(TASK_ID);
         order.verify(commitProcessor).process(101);
         order.verify(commitClaimService).claimRandomCommit(TASK_ID);
         order.verify(commitProcessor).process(102);
         order.verify(commitClaimService).claimRandomCommit(TASK_ID);
+        order.verify(analysisCompletionService)
+                .finishIfNoWorkRemaining(TASK_ID);
         order.verifyNoMoreInteractions();
     }
 }

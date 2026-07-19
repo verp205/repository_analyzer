@@ -1,6 +1,7 @@
 package com.ivan_naumenko.repository_analyzer.commit.repository;
 
 import com.ivan_naumenko.repository_analyzer.commit.model.CommitProcessingStatus;
+import com.ivan_naumenko.repository_analyzer.commit.model.CommitProcessingData;
 import com.ivan_naumenko.repository_analyzer.commit.model.RepositoryCommit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -9,12 +10,40 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
 public interface RepositoryCommitRepository extends JpaRepository<RepositoryCommit, Integer> {
 
     List<RepositoryCommit> findAllByAnalysisTask_Id(Integer analysisTaskId);
+
+    long countByAnalysisTask_IdAndProcessingStatusIn(
+            Integer analysisTaskId,
+            Collection<CommitProcessingStatus> statuses
+    );
+
+    boolean existsByAnalysisTask_IdAndProcessingStatus(
+            Integer analysisTaskId,
+            CommitProcessingStatus status
+    );
+
+    @Query("""
+            SELECT new com.ivan_naumenko.repository_analyzer.commit.model.CommitProcessingData(
+                commit.id,
+                commit.analysisTask.id,
+                commit.commitHash,
+                commit.analysisTask.repositoryUrl,
+                commit.analysisTask.branch
+            )
+            FROM RepositoryCommit commit
+            WHERE commit.id = :commitId
+              AND commit.processingStatus = :status
+            """)
+    Optional<CommitProcessingData> findProcessingData(
+            @Param("commitId") Integer commitId,
+            @Param("status") CommitProcessingStatus status
+    );
 
     @Query(value = """
                 SELECT id
@@ -44,6 +73,24 @@ public interface RepositoryCommitRepository extends JpaRepository<RepositoryComm
             @Param("commitId") Integer commitId,
             @Param("expectedStatus") CommitProcessingStatus expectedStatus,
             @Param("newStatus") CommitProcessingStatus newStatus,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query("""
+            UPDATE RepositoryCommit commit
+            SET commit.processingStatus = :newStatus,
+                commit.lastError = :lastError,
+                commit.updatedAt = :updatedAt
+            WHERE commit.id = :commitId
+              AND commit.processingStatus = :expectedStatus
+            """)
+    int finishProcessingIfCurrent(
+            @Param("commitId") Integer commitId,
+            @Param("expectedStatus") CommitProcessingStatus expectedStatus,
+            @Param("newStatus") CommitProcessingStatus newStatus,
+            @Param("lastError") String lastError,
             @Param("updatedAt") LocalDateTime updatedAt
     );
 

@@ -1,5 +1,6 @@
 package com.ivan_naumenko.repository_analyzer.commit.worker;
 
+import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisCompletionService;
 import com.ivan_naumenko.repository_analyzer.commit.service.CommitClaimService;
 import com.ivan_naumenko.repository_analyzer.commit.service.CommitProcessor;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,7 @@ import java.util.Optional;
 public class CommitWorkerFactory {
     private final CommitClaimService commitClaimService;
     private final CommitProcessor commitProcessor;
+    private final AnalysisCompletionService analysisCompletionService;
 
     public Runnable create(Integer taskId) {
         Objects.requireNonNull(taskId, "taskId не должен быть null");
@@ -23,6 +25,7 @@ public class CommitWorkerFactory {
                         .claimRandomCommit(taskId);
 
                 if (candidate.isEmpty()) {
+                    analysisCompletionService.finishIfNoWorkRemaining(taskId);
                     return;
                 }
 

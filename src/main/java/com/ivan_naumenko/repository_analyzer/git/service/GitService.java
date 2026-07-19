@@ -44,6 +44,23 @@ public class GitService {
             .mapToObj(ignored -> (Lock) new ReentrantLock())
             .toArray(Lock[]::new);
 
+    public Path getRepositoryPath(String repositoryUrl, String branch) {
+        validateArguments(repositoryUrl, branch);
+        String repositoryKey = repositoryKey(
+                repositoryUrl.trim(),
+                branch.trim()
+        );
+        Path repositoryPath = getRepositoriesRoot().resolve(repositoryKey);
+
+        if (!Files.isDirectory(repositoryPath.resolve(".git"))) {
+            throw new RepositoryNotFoundException(
+                    "Локальный репозиторий не найден: " + repositoryPath
+            );
+        }
+
+        return repositoryPath;
+    }
+
     public Path cloneOrUpdateRepository(
             String repositoryUrl,
             String branch

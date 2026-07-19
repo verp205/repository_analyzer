@@ -40,6 +40,10 @@ class GitServiceTest {
 
         Path firstClone = gitService.cloneOrUpdateRepository(repositoryUrl, "main");
 
+        assertEquals(
+                firstClone,
+                gitService.getRepositoryPath(repositoryUrl, "main")
+        );
         assertTrue(firstClone.startsWith(clonesDirectory.toAbsolutePath().normalize()));
         assertTrue(Files.isDirectory(firstClone.resolve(".git")));
         assertTrue(Files.isRegularFile(firstClone.resolve("README.md")));
