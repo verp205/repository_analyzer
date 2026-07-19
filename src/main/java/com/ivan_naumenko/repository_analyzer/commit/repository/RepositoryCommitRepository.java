@@ -1,5 +1,6 @@
 package com.ivan_naumenko.repository_analyzer.commit.repository;
 
+import com.ivan_naumenko.repository_analyzer.commit.model.CommitProcessingStatus;
 import com.ivan_naumenko.repository_analyzer.commit.model.RepositoryCommit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -33,15 +34,17 @@ public interface RepositoryCommitRepository extends JpaRepository<RepositoryComm
     @Transactional
     @Query("""
             UPDATE RepositoryCommit r
-            SET r.processingStatus = 'PENDING',
-            r.attemptCount = r.attemptCount + 1,
-            r.updatedAt = :updatedAt
+            SET r.processingStatus = :newStatus,
+                r.attemptCount = r.attemptCount + 1,
+                r.updatedAt = :updatedAt
             WHERE r.id = :commitId
-                AND r.processingStatus = 'NEW'
-    """)
-    int claimIfNew(
-      @Param("commitId") Integer commitId,
-      @Param("updatedAt") LocalDateTime updatedAt
+              AND r.processingStatus = :expectedStatus
+            """)
+    int updateProcessingStatusIfCurrent(
+            @Param("commitId") Integer commitId,
+            @Param("expectedStatus") CommitProcessingStatus expectedStatus,
+            @Param("newStatus") CommitProcessingStatus newStatus,
+            @Param("updatedAt") LocalDateTime updatedAt
     );
 
 }
