@@ -22,9 +22,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
 class CommitDiscoveryServiceIntegrationTest {
@@ -33,6 +40,9 @@ class CommitDiscoveryServiceIntegrationTest {
 
     @Autowired
     private CommitDiscoveryService discoveryService;
+
+    @Autowired
+    private CommitClaimService claimService;
 
     @Autowired
     private AnalysisTaskService analysisTaskService;
@@ -123,6 +133,60 @@ class CommitDiscoveryServiceIntegrationTest {
         assertEquals(child.getId(), parent.getChildCommit().getId());
         assertEquals(rootHash, parent.getParentHash());
         assertEquals(0, parent.getParentPosition());
+    }
+
+    @Test
+    void onlyOneConcurrentWorkerCanClaimCommit() throws Exception {
+        AnalysisTask task = analysisTaskService.createOrGet(
+                "https://example.com/claim.git",
+                "main"
+        );
+        GitCommit gitCommit = new GitCommit(
+                "c".repeat(40),
+                List.of(),
+                "Test User",
+                "test@example.com",
+                Instant.parse("2026-07-19T12:00:00Z"),
+                "Concurrent claim"
+        );
+        discoveryService.saveDiscoveredCommits(task.getId(), List.of(gitCommit));
+
+        ExecutorService workers = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try {
+            Future<Optional<Integer>> first = workers.submit(() -> {
+                start.await();
+                return claimService.claimRandomCommit(task.getId());
+            });
+            Future<Optional<Integer>> second = workers.submit(() -> {
+                start.await();
+                return claimService.claimRandomCommit(task.getId());
+            });
+
+            start.countDown();
+
+            Optional<Integer> firstResult = first.get(10, TimeUnit.SECONDS);
+            Optional<Integer> secondResult = second.get(10, TimeUnit.SECONDS);
+            long claimedCount = List.of(firstResult, secondResult)
+                    .stream()
+                    .filter(Optional::isPresent)
+                    .count();
+
+            assertEquals(1, claimedCount);
+
+            RepositoryCommit claimedCommit = commitRepository
+                    .findAllByAnalysisTask_Id(task.getId())
+                    .getFirst();
+            assertEquals(
+                    CommitProcessingStatus.PROCESSING,
+                    claimedCommit.getProcessingStatus()
+            );
+            assertEquals(1, claimedCommit.getAttemptCount());
+        } finally {
+            workers.shutdownNow();
+            assertTrue(workers.awaitTermination(5, TimeUnit.SECONDS));
+        }
     }
 
     private static Path createTestDatabasePath() {

@@ -1,19 +1,23 @@
 package com.ivan_naumenko.repository_analyzer.commit.service;
 
+import com.ivan_naumenko.repository_analyzer.commit.model.CommitProcessingStatus;
 import com.ivan_naumenko.repository_analyzer.commit.repository.RepositoryCommitRepository;
-import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Objects;
 import java.util.Optional;
 
-@AllArgsConstructor
+@RequiredArgsConstructor
 @Service
 public class CommitClaimService {
 
     private final RepositoryCommitRepository repositoryCommitRepository;
 
     public Optional<Integer> claimRandomCommit(Integer taskId) {
+        Objects.requireNonNull(taskId, "taskId не должен быть null");
+
         while (true) {
             Optional<Integer> candidate = repositoryCommitRepository
                     .findRandomNewCommitId(taskId);
@@ -24,8 +28,11 @@ public class CommitClaimService {
 
             Integer commitId = candidate.get();
 
-            int updatedRows = repositoryCommitRepository.claimIfNew(
+            int updatedRows = repositoryCommitRepository
+                    .updateProcessingStatusIfCurrent(
                     commitId,
+                    CommitProcessingStatus.NEW,
+                    CommitProcessingStatus.PROCESSING,
                     LocalDateTime.now()
             );
 

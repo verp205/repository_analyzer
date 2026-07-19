@@ -1,9 +1,11 @@
 package com.ivan_naumenko.repository_analyzer.analysis.orchestrator;
 
+import com.ivan_naumenko.repository_analyzer.analysis.config.AnalysisProperties;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskService;
 import com.ivan_naumenko.repository_analyzer.commit.service.CommitDiscoveryService;
+import com.ivan_naumenko.repository_analyzer.commit.worker.CommitWorkerFactory;
 import com.ivan_naumenko.repository_analyzer.git.model.GitCommit;
 import com.ivan_naumenko.repository_analyzer.git.service.GitService;
 import org.slf4j.Logger;
@@ -26,18 +28,24 @@ public class AnalysisOrchestrator {
     private final AnalysisTaskService analysisTaskService;
     private final GitService gitService;
     private final CommitDiscoveryService commitDiscoveryService;
+    private final CommitWorkerFactory commitWorkerFactory;
+    private final AnalysisProperties analysisProperties;
     private final ExecutorService analysisExecutor;
 
     public AnalysisOrchestrator(
             AnalysisTaskService analysisTaskService,
             GitService gitService,
             CommitDiscoveryService commitDiscoveryService,
+            CommitWorkerFactory commitWorkerFactory,
+            AnalysisProperties analysisProperties,
             @Qualifier("analysisExecutor")
             ExecutorService analysisExecutor
     ) {
         this.analysisTaskService = analysisTaskService;
         this.gitService = gitService;
         this.commitDiscoveryService = commitDiscoveryService;
+        this.commitWorkerFactory = commitWorkerFactory;
+        this.analysisProperties = analysisProperties;
         this.analysisExecutor = analysisExecutor;
     }
 
@@ -120,10 +128,27 @@ public class AnalysisOrchestrator {
                                 + "DISCOVERING_COMMITS",
                         taskId
                 );
+                return;
             }
+
+            startCommitWorkers(taskId);
         } catch (Exception exception) {
             markTaskAsFailed(taskId, exception);
         }
+    }
+
+    private void startCommitWorkers(Integer taskId) {
+        for (int workerNumber = 0;
+             workerNumber < analysisProperties.maxThreads();
+             workerNumber++) {
+            analysisExecutor.execute(commitWorkerFactory.create(taskId));
+        }
+
+        log.info(
+                "Для задачи {} запущено {} commit worker-ов",
+                taskId,
+                analysisProperties.maxThreads()
+        );
     }
 
     private void returnTaskToNew(
@@ -161,6 +186,14 @@ public class AnalysisOrchestrator {
                 markedAsFailed = analysisTaskService.updateStatusIfCurrent(
                         taskId,
                         AnalysisTaskStatus.DISCOVERING_COMMITS,
+                        AnalysisTaskStatus.FAILED
+                );
+            }
+
+            if (!markedAsFailed) {
+                markedAsFailed = analysisTaskService.updateStatusIfCurrent(
+                        taskId,
+                        AnalysisTaskStatus.PROCESSING,
                         AnalysisTaskStatus.FAILED
                 );
             }

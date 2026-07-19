@@ -1,9 +1,11 @@
 package com.ivan_naumenko.repository_analyzer.analysis.orchestrator;
 
+import com.ivan_naumenko.repository_analyzer.analysis.config.AnalysisProperties;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskService;
 import com.ivan_naumenko.repository_analyzer.commit.service.CommitDiscoveryService;
+import com.ivan_naumenko.repository_analyzer.commit.worker.CommitWorkerFactory;
 import com.ivan_naumenko.repository_analyzer.git.service.GitService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +26,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -46,6 +49,9 @@ class AnalysisOrchestratorTest {
     private CommitDiscoveryService commitDiscoveryService;
 
     @Mock
+    private CommitWorkerFactory commitWorkerFactory;
+
+    @Mock
     private ExecutorService analysisExecutor;
 
     private AnalysisOrchestrator orchestrator;
@@ -56,6 +62,8 @@ class AnalysisOrchestratorTest {
                 analysisTaskService,
                 gitService,
                 commitDiscoveryService,
+                commitWorkerFactory,
+                new AnalysisProperties(2, 100),
                 analysisExecutor
         );
     }
@@ -85,6 +93,7 @@ class AnalysisOrchestratorTest {
                 AnalysisTaskStatus.DISCOVERING_COMMITS,
                 AnalysisTaskStatus.PROCESSING
         )).thenReturn(true);
+        when(commitWorkerFactory.create(TASK_ID)).thenReturn(() -> { });
         runSubmittedTaskImmediately();
 
         boolean started = orchestrator.start(TASK_ID);
@@ -98,6 +107,7 @@ class AnalysisOrchestratorTest {
                 AnalysisTaskStatus.DISCOVERING_COMMITS,
                 AnalysisTaskStatus.PROCESSING
         );
+        verify(commitWorkerFactory, times(2)).create(TASK_ID);
     }
 
     @Test
