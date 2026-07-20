@@ -16,7 +16,6 @@ public record AnalysisProperties(
         int queueCapacity,
 
         @Min(1)
-        @Max(3)
         int maxAttempts
 ) {
 }

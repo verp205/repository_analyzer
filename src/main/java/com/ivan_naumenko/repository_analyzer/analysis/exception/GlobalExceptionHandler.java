@@ -35,4 +35,16 @@ public class GlobalExceptionHandler {
                         LocalDateTime.now()
                 ));
     }
+
+    @ExceptionHandler(AnalysisRecoveryException.class)
+    public ResponseEntity<ApiErrorResponse> handleAnalysisRecovery(
+            AnalysisRecoveryException ex
+    ) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(new ApiErrorResponse(
+                        HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                        ex.getMessage(),
+                        LocalDateTime.now()
+                ));
+    }
 }

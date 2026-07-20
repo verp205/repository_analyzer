@@ -1,11 +1,13 @@
 package com.ivan_naumenko.repository_analyzer.analysis.controller;
 
+import com.ivan_naumenko.repository_analyzer.analysis.exception.AnalysisRecoveryException;
 import com.ivan_naumenko.repository_analyzer.analysis.exception.AnalysisTaskNotFoundException;
 import com.ivan_naumenko.repository_analyzer.analysis.exception.GlobalExceptionHandler;
 import com.ivan_naumenko.repository_analyzer.analysis.mapper.TaskMapper;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.analysis.orchestrator.AnalysisOrchestrator;
+import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisRecoveryService;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,6 +41,9 @@ class AnalysisTaskControllerTest {
     private AnalysisTaskService analysisTaskService;
 
     @Mock
+    private AnalysisRecoveryService analysisRecoveryService;
+
+    @Mock
     private AnalysisOrchestrator orchestrator;
 
     private MockMvc mockMvc;
@@ -47,6 +52,7 @@ class AnalysisTaskControllerTest {
     void setUp() {
         AnalysisTaskController controller = new AnalysisTaskController(
                 analysisTaskService,
+                analysisRecoveryService,
                 new TaskMapper(),
                 orchestrator
         );
@@ -147,6 +153,50 @@ class AnalysisTaskControllerTest {
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.status").value(503))
                 .andExpect(jsonPath("$.message").value("Очередь заполнена"));
+
+        verify(analysisTaskService, never()).getById(TASK_ID);
+    }
+
+    @Test
+    void returnsAcceptedWhenFailedTaskRetryWasStarted() throws Exception {
+        when(analysisRecoveryService.retryFailedTask(TASK_ID)).thenReturn(true);
+        when(analysisTaskService.getById(TASK_ID))
+                .thenReturn(task(AnalysisTaskStatus.CLONING));
+
+        mockMvc.perform(post("/api/analysis-tasks/{id}/retry", TASK_ID))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.id").value(TASK_ID))
+                .andExpect(jsonPath("$.status").value("CLONING"));
+
+        verify(analysisRecoveryService).retryFailedTask(TASK_ID);
+    }
+
+    @Test
+    void returnsConflictWhenTaskCannotBeRetried() throws Exception {
+        when(analysisRecoveryService.retryFailedTask(TASK_ID)).thenReturn(false);
+        when(analysisTaskService.getById(TASK_ID))
+                .thenReturn(task(AnalysisTaskStatus.COMPLETED));
+
+        mockMvc.perform(post("/api/analysis-tasks/{id}/retry", TASK_ID))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.id").value(TASK_ID))
+                .andExpect(jsonPath("$.status").value("COMPLETED"));
+    }
+
+    @Test
+    void returnsInternalServerErrorWhenRetryFails() throws Exception {
+        when(analysisRecoveryService.retryFailedTask(TASK_ID))
+                .thenThrow(new AnalysisRecoveryException(
+                        TASK_ID,
+                        new IllegalStateException("database error")
+                ));
+
+        mockMvc.perform(post("/api/analysis-tasks/{id}/retry", TASK_ID))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.status").value(500))
+                .andExpect(jsonPath("$.message").value(
+                        "Не удалось восстановить задачу анализа: " + TASK_ID
+                ));
 
         verify(analysisTaskService, never()).getById(TASK_ID);
     }

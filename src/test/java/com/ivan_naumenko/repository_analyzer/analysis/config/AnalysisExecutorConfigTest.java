@@ -16,7 +16,7 @@ class AnalysisExecutorConfigTest {
     void rejectsTaskWhenWorkersAndBoundedQueueAreFull() throws Exception {
         AnalysisExecutorConfig config = new AnalysisExecutorConfig();
         ExecutorService executor = config.analysisExecutor(
-                new AnalysisProperties(1, 1)
+                new AnalysisProperties(1, 1, 3)
         );
         CountDownLatch workerStarted = new CountDownLatch(1);
         CountDownLatch releaseWorker = new CountDownLatch(1);

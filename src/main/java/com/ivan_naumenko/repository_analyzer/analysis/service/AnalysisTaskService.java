@@ -58,7 +58,6 @@ public class AnalysisTaskService {
     }
 
     public AnalysisTask getById(Integer id) {
-
         return repository.findById(id)
                 .orElseThrow(() -> new AnalysisTaskNotFoundException("Задача не найдена"));
     }

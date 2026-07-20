@@ -63,7 +63,7 @@ class AnalysisOrchestratorTest {
                 gitService,
                 commitDiscoveryService,
                 commitWorkerFactory,
-                new AnalysisProperties(2, 100),
+                new AnalysisProperties(2, 100, 3),
                 analysisExecutor
         );
     }

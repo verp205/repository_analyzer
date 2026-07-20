@@ -1,5 +1,6 @@
 package com.ivan_naumenko.repository_analyzer.commit.repository;
 
+import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.commit.model.CommitProcessingStatus;
 import com.ivan_naumenko.repository_analyzer.commit.model.CommitProcessingData;
 import com.ivan_naumenko.repository_analyzer.commit.model.RepositoryCommit;
@@ -104,7 +105,7 @@ public interface RepositoryCommitRepository extends JpaRepository<RepositoryComm
           AND r.processingStatus = :expectedStatus
         """)
     int requeueInterruptedCommits(
-            @Param("commitId") Integer taskId,
+            @Param("taskId") Integer taskId,
             @Param("expectedStatus") CommitProcessingStatus expectedStatus,
             @Param("newStatus") CommitProcessingStatus newStatus,
             @Param("updatedAt") LocalDateTime updatedAt
@@ -119,13 +120,15 @@ public interface RepositoryCommitRepository extends JpaRepository<RepositoryComm
         WHERE r.analysisTask.id = :taskId
           AND r.processingStatus = :expectedStatus
           AND r.attemptCount < :maxAttempts
+          AND r.analysisTask.status = :taskStatus
         """)
     int requeueRetryableFailedCommits(
-            @Param("commitId") Integer taskId,
+            @Param("taskId") Integer taskId,
             @Param("expectedStatus") CommitProcessingStatus expectedStatus,
             @Param("newStatus") CommitProcessingStatus newStatus,
             @Param("updatedAt") LocalDateTime updatedAt,
-            @Param("maxAttempts") int maxAttempts
+            @Param("maxAttempts") int maxAttempts,
+            @Param("taskStatus") AnalysisTaskStatus taskStatus
     );
 
 }
