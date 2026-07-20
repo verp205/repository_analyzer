@@ -79,12 +79,12 @@ public interface RepositoryCommitRepository extends JpaRepository<RepositoryComm
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Transactional
     @Query("""
-            UPDATE RepositoryCommit commit
-            SET commit.processingStatus = :newStatus,
-                commit.lastError = :lastError,
-                commit.updatedAt = :updatedAt
-            WHERE commit.id = :commitId
-              AND commit.processingStatus = :expectedStatus
+            UPDATE RepositoryCommit r
+            SET r.processingStatus = :newStatus,
+                r.lastError = :lastError,
+                r.updatedAt = :updatedAt
+            WHERE r.id = :commitId
+              AND r.processingStatus = :expectedStatus
             """)
     int finishProcessingIfCurrent(
             @Param("commitId") Integer commitId,
@@ -92,6 +92,40 @@ public interface RepositoryCommitRepository extends JpaRepository<RepositoryComm
             @Param("newStatus") CommitProcessingStatus newStatus,
             @Param("lastError") String lastError,
             @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query("""
+        UPDATE RepositoryCommit r
+        SET r.processingStatus = :newStatus,
+            r.updatedAt = :updatedAt
+        WHERE r.analysisTask.id = :taskId
+          AND r.processingStatus = :expectedStatus
+        """)
+    int requeueInterruptedCommits(
+            @Param("commitId") Integer taskId,
+            @Param("expectedStatus") CommitProcessingStatus expectedStatus,
+            @Param("newStatus") CommitProcessingStatus newStatus,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query("""
+        UPDATE RepositoryCommit r
+        SET r.processingStatus = :newStatus,
+            r.updatedAt = :updatedAt
+        WHERE r.analysisTask.id = :taskId
+          AND r.processingStatus = :expectedStatus
+          AND r.attemptCount < :maxAttempts
+        """)
+    int requeueRetryableFailedCommits(
+            @Param("commitId") Integer taskId,
+            @Param("expectedStatus") CommitProcessingStatus expectedStatus,
+            @Param("newStatus") CommitProcessingStatus newStatus,
+            @Param("updatedAt") LocalDateTime updatedAt,
+            @Param("maxAttempts") int maxAttempts
     );
 
 }

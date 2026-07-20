@@ -13,6 +13,10 @@ public record AnalysisProperties(
         int maxThreads,
 
         @Min(1)
-        int queueCapacity
+        int queueCapacity,
+
+        @Min(1)
+        @Max(3)
+        int maxAttempts
 ) {
 }
