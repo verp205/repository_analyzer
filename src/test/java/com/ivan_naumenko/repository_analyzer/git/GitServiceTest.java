@@ -1,6 +1,7 @@
 package com.ivan_naumenko.repository_analyzer.git;
 
 import com.ivan_naumenko.repository_analyzer.git.config.DirectoryProperties;
+import com.ivan_naumenko.repository_analyzer.git.exception.RepositoryReadException;
 import com.ivan_naumenko.repository_analyzer.git.exception.RepositorySyncException;
 import com.ivan_naumenko.repository_analyzer.git.model.GitCommit;
 import com.ivan_naumenko.repository_analyzer.git.service.GitService;
@@ -21,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GitServiceTest {
@@ -102,6 +104,129 @@ class GitServiceTest {
         assertEquals("Test User", newestCommit.authorName());
         assertEquals("test@example.com", newestCommit.authorMail());
         assertNotNull(newestCommit.committedAt());
+    }
+
+    @Test
+    void readsFileContentFromExactCommitWithoutCheckout() throws Exception {
+        Path sourceDirectory = tempDirectory.resolve("file-source");
+        Path clonesDirectory = tempDirectory.resolve("file-clones");
+        createSourceRepository(sourceDirectory);
+
+        String gitFilePath = "src/main/java/example/App.java";
+        String firstContent = "class App { int version() { return 1; } }\n";
+        String secondContent = "class App { int version() { return 2; } }\n";
+        String firstCommitHash;
+        String secondCommitHash;
+
+        try (Git sourceGit = Git.open(sourceDirectory.toFile())) {
+            Path javaFile = sourceDirectory.resolve(gitFilePath);
+            Files.createDirectories(javaFile.getParent());
+            Files.writeString(javaFile, firstContent);
+            sourceGit.add().addFilepattern(gitFilePath).call();
+            firstCommitHash = sourceGit.commit()
+                    .setMessage("Add App")
+                    .setAuthor("Test User", "test@example.com")
+                    .setCommitter("Test User", "test@example.com")
+                    .call()
+                    .getName();
+
+            Files.writeString(javaFile, secondContent);
+            sourceGit.add().addFilepattern(gitFilePath).call();
+            secondCommitHash = sourceGit.commit()
+                    .setMessage("Update App")
+                    .setAuthor("Test User", "test@example.com")
+                    .setCommitter("Test User", "test@example.com")
+                    .call()
+                    .getName();
+        }
+
+        GitService gitService = new GitService(
+                new DirectoryProperties(clonesDirectory)
+        );
+        String repositoryUrl = sourceDirectory.toUri().toString();
+        Path clonedRepository = gitService.cloneOrUpdateRepository(
+                repositoryUrl,
+                "main"
+        );
+
+        Files.writeString(
+                clonedRepository.resolve(gitFilePath),
+                "class App { int version() { return 999; } }\n"
+        );
+
+        assertEquals(
+                firstContent,
+                gitService.readFileAtCommit(
+                        clonedRepository,
+                        firstCommitHash,
+                        gitFilePath
+                )
+        );
+        assertEquals(
+                secondContent,
+                gitService.readFileAtCommit(
+                        clonedRepository,
+                        secondCommitHash,
+                        gitFilePath
+                )
+        );
+    }
+
+    @Test
+    void reportsWhenFileDoesNotExistInCommit() throws Exception {
+        Path sourceDirectory = tempDirectory.resolve("missing-file-source");
+        Path clonesDirectory = tempDirectory.resolve("missing-file-clones");
+        createSourceRepository(sourceDirectory);
+
+        String commitHash;
+        try (Git sourceGit = Git.open(sourceDirectory.toFile())) {
+            commitHash = sourceGit.getRepository().resolve("HEAD").getName();
+        }
+
+        GitService gitService = new GitService(
+                new DirectoryProperties(clonesDirectory)
+        );
+        Path clonedRepository = gitService.cloneOrUpdateRepository(
+                sourceDirectory.toUri().toString(),
+                "main"
+        );
+
+        RepositoryReadException exception = assertThrows(
+                RepositoryReadException.class,
+                () -> gitService.readFileAtCommit(
+                        clonedRepository,
+                        commitHash,
+                        "src/Missing.java"
+                )
+        );
+
+        assertTrue(exception.getMessage().contains("src/Missing.java"));
+    }
+
+    @Test
+    void reportsWhenCommitDoesNotExist() throws Exception {
+        Path sourceDirectory = tempDirectory.resolve("missing-commit-source");
+        Path clonesDirectory = tempDirectory.resolve("missing-commit-clones");
+        createSourceRepository(sourceDirectory);
+
+        GitService gitService = new GitService(
+                new DirectoryProperties(clonesDirectory)
+        );
+        Path clonedRepository = gitService.cloneOrUpdateRepository(
+                sourceDirectory.toUri().toString(),
+                "main"
+        );
+
+        RepositoryReadException exception = assertThrows(
+                RepositoryReadException.class,
+                () -> gitService.readFileAtCommit(
+                        clonedRepository,
+                        "0".repeat(40),
+                        "README.md"
+                )
+        );
+
+        assertTrue(exception.getMessage().contains("Коммит не найден"));
     }
 
     @Test

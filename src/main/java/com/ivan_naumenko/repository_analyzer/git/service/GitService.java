@@ -11,9 +11,14 @@ import org.eclipse.jgit.api.CreateBranchCommand;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.ObjectLoader;
 import org.eclipse.jgit.lib.PersonIdent;
 import org.eclipse.jgit.lib.Ref;
+import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.treewalk.TreeWalk;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -230,6 +235,63 @@ public class GitService {
         }
     }
 
+    public String readFileAtCommit(
+            Path repositoryPath,
+            String commitHash,
+            String filePath
+    ) {
+        validateFileReadArguments(repositoryPath, commitHash, filePath);
+
+        String normalizedCommitHash = commitHash.trim();
+        String normalizedFilePath = normalizeGitPath(filePath);
+
+        try (Git git = Git.open(repositoryPath.toFile());
+             RevWalk revWalk = new RevWalk(git.getRepository())) {
+            Repository repository = git.getRepository();
+            ObjectId commitId = repository.resolve(normalizedCommitHash);
+
+            if (commitId == null
+                    || !repository.getObjectDatabase().has(commitId)) {
+                throw new RepositoryReadException(
+                        "Коммит не найден: " + normalizedCommitHash
+                );
+            }
+
+            RevCommit commit = revWalk.parseCommit(commitId);
+
+            try (TreeWalk treeWalk = TreeWalk.forPath(
+                    repository,
+                    normalizedFilePath,
+                    commit.getTree()
+            )) {
+                if (treeWalk == null) {
+                    throw new RepositoryReadException(
+                            "Файл "
+                                    + normalizedFilePath
+                                    + " не найден в коммите "
+                                    + normalizedCommitHash
+                    );
+                }
+
+                ObjectId blobId = treeWalk.getObjectId(0);
+                ObjectLoader loader = repository.open(blobId);
+
+                return new String(
+                        loader.getBytes(),
+                        StandardCharsets.UTF_8
+                );
+            }
+        } catch (IOException exception) {
+            throw new RepositoryReadException(
+                    "Не удалось прочитать файл "
+                            + normalizedFilePath
+                            + " из коммита "
+                            + normalizedCommitHash,
+                    exception
+            );
+        }
+    }
+
     private void cloneRepository(
             String repositoryUrl,
             String branch,
@@ -318,5 +380,43 @@ public class GitService {
                     "Название ветки не должно быть пустым"
             );
         }
+    }
+
+    private void validateFileReadArguments(
+            Path repositoryPath,
+            String commitHash,
+            String filePath
+    ) {
+        if (repositoryPath == null) {
+            throw new IllegalArgumentException(
+                    "Путь к репозиторию не должен быть null"
+            );
+        }
+
+        if (commitHash == null || commitHash.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Хеш коммита не должен быть пустым"
+            );
+        }
+
+        if (filePath == null || filePath.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Путь к файлу не должен быть пустым"
+            );
+        }
+    }
+
+    private String normalizeGitPath(String filePath) {
+        String normalizedPath = filePath.trim().replace('\\', '/');
+
+        if (normalizedPath.startsWith("/")
+                || Arrays.stream(normalizedPath.split("/"))
+                .anyMatch(segment -> segment.equals(".."))) {
+            throw new IllegalArgumentException(
+                    "Путь внутри Git должен быть относительным: " + filePath
+            );
+        }
+
+        return normalizedPath;
     }
 }
