@@ -35,7 +35,10 @@ public interface RepositoryCommitRepository extends JpaRepository<RepositoryComm
                 commit.analysisTask.id,
                 commit.commitHash,
                 commit.analysisTask.repositoryUrl,
-                commit.analysisTask.branch
+                commit.analysisTask.branch,
+                commit.authorName,
+                commit.committedAt,
+                commit.message
             )
             FROM RepositoryCommit commit
             WHERE commit.id = :commitId

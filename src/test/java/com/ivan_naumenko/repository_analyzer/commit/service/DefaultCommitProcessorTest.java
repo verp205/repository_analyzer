@@ -14,6 +14,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -166,7 +167,10 @@ class DefaultCommitProcessorTest {
                 7,
                 COMMIT_HASH,
                 REPOSITORY_URL,
-                BRANCH
+                BRANCH,
+                "Test User",
+                Instant.parse("2026-07-20T10:00:00Z"),
+                "Test commit"
         );
     }
 }
