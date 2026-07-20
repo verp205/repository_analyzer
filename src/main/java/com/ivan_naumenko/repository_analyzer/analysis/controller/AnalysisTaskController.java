@@ -2,11 +2,13 @@ package com.ivan_naumenko.repository_analyzer.analysis.controller;
 
 import com.ivan_naumenko.repository_analyzer.analysis.dto.AnalysisTaskResponse;
 import com.ivan_naumenko.repository_analyzer.analysis.dto.CreateAnalysisTaskRequest;
+import com.ivan_naumenko.repository_analyzer.analysis.dto.AnalysisTaskProgressResponse;
 import com.ivan_naumenko.repository_analyzer.analysis.mapper.TaskMapper;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
 import com.ivan_naumenko.repository_analyzer.analysis.orchestrator.AnalysisOrchestrator;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisRecoveryService;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskService;
+import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisProgressService;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -18,19 +20,34 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 @AllArgsConstructor
 @RestController
 @RequestMapping("/api/analysis-tasks")
 public class AnalysisTaskController {
 
     private final AnalysisTaskService analysisTaskService;
+    private final AnalysisProgressService progressService;
     private final AnalysisRecoveryService analysisRecoveryService;
     private final TaskMapper taskMapper;
     private final AnalysisOrchestrator orchestrator;
 
+    @GetMapping
+    public List<AnalysisTaskResponse> getAnalysisTasks() {
+        return analysisTaskService.getAll().stream()
+                .map(taskMapper::toResponse)
+                .toList();
+    }
+
     @GetMapping("/{id}")
     public AnalysisTaskResponse getAnalysisTask(@PathVariable Integer id) {
         return taskMapper.toResponse(analysisTaskService.getById(id));
+    }
+
+    @GetMapping("/{id}/progress")
+    public AnalysisTaskProgressResponse getProgress(@PathVariable Integer id) {
+        return progressService.get(id);
     }
 
     @PostMapping

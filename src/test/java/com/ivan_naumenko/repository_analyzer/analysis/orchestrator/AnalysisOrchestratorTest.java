@@ -7,6 +7,7 @@ import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskServic
 import com.ivan_naumenko.repository_analyzer.commit.service.CommitDiscoveryService;
 import com.ivan_naumenko.repository_analyzer.commit.worker.CommitWorkerFactory;
 import com.ivan_naumenko.repository_analyzer.git.service.GitService;
+import com.ivan_naumenko.repository_analyzer.persistence.SqliteWriteCoordinator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -64,6 +65,7 @@ class AnalysisOrchestratorTest {
                 commitDiscoveryService,
                 commitWorkerFactory,
                 new AnalysisProperties(2, 100, 3),
+                new SqliteWriteCoordinator(),
                 analysisExecutor
         );
     }

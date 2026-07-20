@@ -3,6 +3,7 @@ package com.ivan_naumenko.repository_analyzer.analysis.service;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.commit.model.CommitProcessingStatus;
 import com.ivan_naumenko.repository_analyzer.commit.repository.RepositoryCommitRepository;
+import com.ivan_naumenko.repository_analyzer.persistence.SqliteWriteCoordinator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -89,7 +90,8 @@ class AnalysisCompletionServiceTest {
     private AnalysisCompletionService service() {
         return new AnalysisCompletionService(
                 commitRepository,
-                analysisTaskService
+                analysisTaskService,
+                new SqliteWriteCoordinator()
         );
     }
 }

@@ -2,6 +2,7 @@ package com.ivan_naumenko.repository_analyzer.commit.service;
 
 import com.ivan_naumenko.repository_analyzer.commit.model.CommitProcessingStatus;
 import com.ivan_naumenko.repository_analyzer.commit.repository.RepositoryCommitRepository;
+import com.ivan_naumenko.repository_analyzer.persistence.SqliteWriteCoordinator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -28,7 +29,10 @@ class CommitClaimServiceTest {
 
     @Test
     void retriesWhenAnotherWorkerClaimsFirstCandidate() {
-        CommitClaimService service = new CommitClaimService(repository);
+        CommitClaimService service = new CommitClaimService(
+                repository,
+                new SqliteWriteCoordinator()
+        );
         when(repository.findRandomNewCommitId(TASK_ID))
                 .thenReturn(Optional.of(101), Optional.of(102));
         when(repository.updateProcessingStatusIfCurrent(
@@ -58,7 +62,10 @@ class CommitClaimServiceTest {
 
     @Test
     void returnsEmptyWhenNoNewCommitExists() {
-        CommitClaimService service = new CommitClaimService(repository);
+        CommitClaimService service = new CommitClaimService(
+                repository,
+                new SqliteWriteCoordinator()
+        );
         when(repository.findRandomNewCommitId(TASK_ID))
                 .thenReturn(Optional.empty());
 

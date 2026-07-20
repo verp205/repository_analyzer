@@ -2,6 +2,7 @@ package com.ivan_naumenko.repository_analyzer.analysis.service;
 
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
 import com.ivan_naumenko.repository_analyzer.analysis.repository.AnalysisTaskRepository;
+import com.ivan_naumenko.repository_analyzer.persistence.SqliteWriteCoordinator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -27,7 +28,7 @@ class AnalysisTaskServiceTest {
 
     @Test
     void normalizesRepositoryUrlAndBranchBeforeSaving() {
-        AnalysisTaskService service = new AnalysisTaskService(repository);
+        AnalysisTaskService service = service();
         when(repository.findByRepositoryUrlAndBranch(
                 "https://example.com/project.git",
                 "main"
@@ -50,7 +51,7 @@ class AnalysisTaskServiceTest {
 
     @Test
     void returnsTaskCreatedByAnotherRequestAfterUniqueConstraintViolation() {
-        AnalysisTaskService service = new AnalysisTaskService(repository);
+        AnalysisTaskService service = service();
         AnalysisTask existingTask = new AnalysisTask();
         String repositoryUrl = "https://example.com/project.git";
         String branch = "main";
@@ -67,7 +68,7 @@ class AnalysisTaskServiceTest {
 
     @Test
     void doesNotHideOtherDatabaseFailures() {
-        AnalysisTaskService service = new AnalysisTaskService(repository);
+        AnalysisTaskService service = service();
         String repositoryUrl = "https://example.com/project.git";
         String branch = "main";
         DataAccessResourceFailureException databaseFailure =
@@ -84,5 +85,12 @@ class AnalysisTaskServiceTest {
         );
 
         assertSame(databaseFailure, thrown);
+    }
+
+    private AnalysisTaskService service() {
+        return new AnalysisTaskService(
+                repository,
+                new SqliteWriteCoordinator()
+        );
     }
 }

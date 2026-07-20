@@ -12,9 +12,11 @@ import com.ivan_naumenko.repository_analyzer.javaanalysis.entity.JavaFileAnalysi
 import com.ivan_naumenko.repository_analyzer.javaanalysis.mapper.JavaAnalysisMapper;
 import com.ivan_naumenko.repository_analyzer.javaanalysis.model.ChangedJavaFileAnalysis;
 import com.ivan_naumenko.repository_analyzer.javaanalysis.repository.JavaFileAnalysisRepository;
+import com.ivan_naumenko.repository_analyzer.persistence.SqliteWriteCoordinator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.HashSet;
@@ -32,8 +34,9 @@ public class CommitResultService {
     private final CommitDiffRepository diffRepository;
     private final JavaAnalysisMapper javaAnalysisMapper;
     private final JavaFileAnalysisRepository javaAnalysisRepository;
+    private final SqliteWriteCoordinator writeCoordinator;
+    private final TransactionTemplate transactionTemplate;
 
-    @Transactional
     public void complete(
             Integer commitId,
             CommitDiff diff,
@@ -46,6 +49,16 @@ public class CommitResultService {
                 "javaAnalyses не должен быть null"
         );
 
+        writeCoordinator.execute(() -> transactionTemplate.executeWithoutResult(
+                ignored -> completeInTransaction(commitId, diff, javaAnalyses)
+        ));
+    }
+
+    private void completeInTransaction(
+            Integer commitId,
+            CommitDiff diff,
+            List<ChangedJavaFileAnalysis> javaAnalyses
+    ) {
         RepositoryCommit commit = commitRepository.getReferenceById(commitId);
         if (!commit.getCommitHash().equals(diff.commitHash())) {
             throw new IllegalArgumentException(
@@ -134,18 +147,19 @@ public class CommitResultService {
                 && changedFile.getNewPath() != null;
     }
 
-    @Transactional
     public boolean fail(Integer commitId, Throwable cause) {
         Objects.requireNonNull(commitId, "commitId не должен быть null");
         Objects.requireNonNull(cause, "cause не должен быть null");
 
-        return commitRepository.finishProcessingIfCurrent(
-                commitId,
-                CommitProcessingStatus.PROCESSING,
-                CommitProcessingStatus.FAILED,
-                errorMessage(cause),
-                LocalDateTime.now()
-        ) == 1;
+        return writeCoordinator.execute(() -> transactionTemplate.execute(
+                ignored -> commitRepository.finishProcessingIfCurrent(
+                        commitId,
+                        CommitProcessingStatus.PROCESSING,
+                        CommitProcessingStatus.FAILED,
+                        errorMessage(cause),
+                        LocalDateTime.now()
+                ) == 1
+        ));
     }
 
     private CommitDiffEntity toEntity(

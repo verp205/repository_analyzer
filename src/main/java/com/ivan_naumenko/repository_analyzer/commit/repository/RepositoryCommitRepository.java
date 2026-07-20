@@ -3,6 +3,7 @@ package com.ivan_naumenko.repository_analyzer.commit.repository;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.commit.model.CommitProcessingStatus;
 import com.ivan_naumenko.repository_analyzer.commit.model.CommitProcessingData;
+import com.ivan_naumenko.repository_analyzer.commit.model.CommitStatusCount;
 import com.ivan_naumenko.repository_analyzer.commit.model.RepositoryCommit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -18,6 +19,31 @@ import java.util.Optional;
 public interface RepositoryCommitRepository extends JpaRepository<RepositoryCommit, Integer> {
 
     List<RepositoryCommit> findAllByAnalysisTask_Id(Integer analysisTaskId);
+
+    @Query("""
+            SELECT new com.ivan_naumenko.repository_analyzer.commit.model.CommitStatusCount(
+                commit.processingStatus,
+                COUNT(commit)
+            )
+            FROM RepositoryCommit commit
+            WHERE commit.analysisTask.id = :taskId
+            GROUP BY commit.processingStatus
+            """)
+    List<CommitStatusCount> countByStatus(
+            @Param("taskId") Integer taskId
+    );
+
+    @Query("""
+            SELECT commit.id
+            FROM RepositoryCommit commit
+            WHERE commit.analysisTask.id = :taskId
+              AND commit.processingStatus = :status
+            ORDER BY commit.committedAt ASC, commit.id ASC
+            """)
+    List<Integer> findIdsForReport(
+            @Param("taskId") Integer taskId,
+            @Param("status") CommitProcessingStatus status
+    );
 
     long countByAnalysisTask_IdAndProcessingStatusIn(
             Integer analysisTaskId,

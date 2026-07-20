@@ -3,6 +3,7 @@ package com.ivan_naumenko.repository_analyzer.analysis.service;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.commit.model.CommitProcessingStatus;
 import com.ivan_naumenko.repository_analyzer.commit.repository.RepositoryCommitRepository;
+import com.ivan_naumenko.repository_analyzer.persistence.SqliteWriteCoordinator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -20,6 +21,7 @@ public class AnalysisCompletionService {
 
     private final RepositoryCommitRepository commitRepository;
     private final AnalysisTaskService analysisTaskService;
+    private final SqliteWriteCoordinator writeCoordinator;
 
     public boolean finishIfNoWorkRemaining(Integer taskId) {
         Objects.requireNonNull(taskId, "taskId не должен быть null");
@@ -42,10 +44,12 @@ public class AnalysisCompletionService {
                 ? AnalysisTaskStatus.FAILED
                 : AnalysisTaskStatus.COMPLETED;
 
-        return analysisTaskService.updateStatusIfCurrent(
-                taskId,
-                AnalysisTaskStatus.PROCESSING,
-                finalStatus
+        return writeCoordinator.execute(
+                () -> analysisTaskService.updateStatusIfCurrent(
+                        taskId,
+                        AnalysisTaskStatus.PROCESSING,
+                        finalStatus
+                )
         );
     }
 }

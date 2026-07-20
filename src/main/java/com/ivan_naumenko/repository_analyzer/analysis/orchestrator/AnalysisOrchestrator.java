@@ -8,6 +8,7 @@ import com.ivan_naumenko.repository_analyzer.commit.service.CommitDiscoveryServi
 import com.ivan_naumenko.repository_analyzer.commit.worker.CommitWorkerFactory;
 import com.ivan_naumenko.repository_analyzer.git.model.GitCommit;
 import com.ivan_naumenko.repository_analyzer.git.service.GitService;
+import com.ivan_naumenko.repository_analyzer.persistence.SqliteWriteCoordinator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -30,6 +31,7 @@ public class AnalysisOrchestrator {
     private final CommitDiscoveryService commitDiscoveryService;
     private final CommitWorkerFactory commitWorkerFactory;
     private final AnalysisProperties analysisProperties;
+    private final SqliteWriteCoordinator writeCoordinator;
     private final ExecutorService analysisExecutor;
 
     public AnalysisOrchestrator(
@@ -38,6 +40,7 @@ public class AnalysisOrchestrator {
             CommitDiscoveryService commitDiscoveryService,
             CommitWorkerFactory commitWorkerFactory,
             AnalysisProperties analysisProperties,
+            SqliteWriteCoordinator writeCoordinator,
             @Qualifier("analysisExecutor")
             ExecutorService analysisExecutor
     ) {
@@ -46,6 +49,7 @@ public class AnalysisOrchestrator {
         this.commitDiscoveryService = commitDiscoveryService;
         this.commitWorkerFactory = commitWorkerFactory;
         this.analysisProperties = analysisProperties;
+        this.writeCoordinator = writeCoordinator;
         this.analysisExecutor = analysisExecutor;
     }
 
@@ -104,9 +108,11 @@ public class AnalysisOrchestrator {
                     task.getBranch()
             );
 
-            int savedCommits = commitDiscoveryService.saveDiscoveredCommits(
-                    taskId,
-                    commits
+            int savedCommits = writeCoordinator.execute(
+                    () -> commitDiscoveryService.saveDiscoveredCommits(
+                            taskId,
+                            commits
+                    )
             );
 
             log.info(

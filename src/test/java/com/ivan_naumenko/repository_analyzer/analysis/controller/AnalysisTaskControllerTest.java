@@ -9,6 +9,7 @@ import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.analysis.orchestrator.AnalysisOrchestrator;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisRecoveryService;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskService;
+import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisProgressService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -44,6 +45,9 @@ class AnalysisTaskControllerTest {
     private AnalysisRecoveryService analysisRecoveryService;
 
     @Mock
+    private AnalysisProgressService analysisProgressService;
+
+    @Mock
     private AnalysisOrchestrator orchestrator;
 
     private MockMvc mockMvc;
@@ -52,6 +56,7 @@ class AnalysisTaskControllerTest {
     void setUp() {
         AnalysisTaskController controller = new AnalysisTaskController(
                 analysisTaskService,
+                analysisProgressService,
                 analysisRecoveryService,
                 new TaskMapper(),
                 orchestrator

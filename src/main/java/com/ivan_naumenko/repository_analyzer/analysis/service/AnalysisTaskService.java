@@ -4,32 +4,43 @@ import com.ivan_naumenko.repository_analyzer.analysis.exception.AnalysisTaskNotF
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.analysis.repository.AnalysisTaskRepository;
+import com.ivan_naumenko.repository_analyzer.persistence.SqliteWriteCoordinator;
 
 import lombok.RequiredArgsConstructor;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
 public class AnalysisTaskService {
 
     private final AnalysisTaskRepository repository;
+    private final SqliteWriteCoordinator writeCoordinator;
 
     public AnalysisTask createOrGet(String repositoryUrl, String branch) {
 
         String normalizedRepositoryUrl = normalize(repositoryUrl, "URL репозитория");
         String normalizedBranch = normalize(branch, "Название ветки");
 
+        return writeCoordinator.execute(() -> createOrGetUnderWriteLock(
+                normalizedRepositoryUrl,
+                normalizedBranch
+        ));
+    }
+
+    private AnalysisTask createOrGetUnderWriteLock(
+            String normalizedRepositoryUrl,
+            String normalizedBranch
+    ) {
         Optional<AnalysisTask> task = repository.findByRepositoryUrlAndBranch(
                 normalizedRepositoryUrl,
                 normalizedBranch
         );
-
         if (task.isPresent()) {
             return task.get();
         } else {
@@ -62,14 +73,22 @@ public class AnalysisTaskService {
                 .orElseThrow(() -> new AnalysisTaskNotFoundException("Задача не найдена"));
     }
 
-    @Transactional
+    public List<AnalysisTask> getAll() {
+        return repository.findAllByOrderByUpdatedAtDesc();
+    }
+
     public boolean updateStatusIfCurrent(Integer taskId,
                                          AnalysisTaskStatus expectedStatus,
                                          AnalysisTaskStatus newStatus) {
 
-        int updatedRows = repository.updateStatusIfCurrent(taskId, expectedStatus, newStatus, LocalDateTime.now());
-
-        return updatedRows == 1;
+        return writeCoordinator.execute(
+                () -> repository.updateStatusIfCurrent(
+                        taskId,
+                        expectedStatus,
+                        newStatus,
+                        LocalDateTime.now()
+                ) == 1
+        );
     }
 
     private String normalize(String value, String fieldName) {

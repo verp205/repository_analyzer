@@ -30,6 +30,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -201,6 +206,79 @@ class CommitResultServiceIntegrationTest {
         );
     }
 
+    @Test
+    void serializesConcurrentSqliteWritesFromTenWorkers() throws Exception {
+        AnalysisTask task = analysisTaskService.createOrGet(
+                "https://example.com/concurrent-result.git",
+                "main"
+        );
+        List<GitCommit> gitCommits = java.util.stream.IntStream.range(0, 10)
+                .mapToObj(index -> new GitCommit(
+                        "%040x".formatted(index + 1),
+                        List.of(),
+                        "Worker " + index,
+                        "worker@example.com",
+                        Instant.parse("2026-07-19T12:00:00Z")
+                                .plusSeconds(index),
+                        "Concurrent commit " + index
+                ))
+                .toList();
+        discoveryService.saveDiscoveredCommits(task.getId(), gitCommits);
+
+        List<RepositoryCommit> claimed = java.util.stream.IntStream.range(0, 10)
+                .mapToObj(ignored -> claimService.claimRandomCommit(task.getId())
+                        .flatMap(commitRepository::findById)
+                        .orElseThrow())
+                .toList();
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService workers = Executors.newFixedThreadPool(10);
+
+        try {
+            List<CompletableFuture<Void>> futures = claimed.stream()
+                    .map(commit -> CompletableFuture.runAsync(() -> {
+                        await(start);
+                        ChangedFile file = new ChangedFile(
+                                "README.md",
+                                "README.md",
+                                FileChangeType.MODIFY,
+                                1,
+                                0,
+                                false,
+                                "+worker"
+                        );
+                        resultService.complete(
+                                commit.getId(),
+                                new CommitDiff(
+                                        commit.getCommitHash(),
+                                        null,
+                                        List.of(file),
+                                        1,
+                                        0,
+                                        file.patch()
+                                ),
+                                List.of()
+                        );
+                    }, workers))
+                    .toList();
+
+            start.countDown();
+            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
+                    .get(10, TimeUnit.SECONDS);
+        } finally {
+            workers.shutdownNow();
+        }
+
+        assertEquals(10, diffRepository.count());
+        assertEquals(
+                10,
+                commitRepository.findAllByAnalysisTask_Id(task.getId())
+                        .stream()
+                        .filter(commit -> commit.getProcessingStatus()
+                                == CommitProcessingStatus.COMPLETED)
+                        .count()
+        );
+    }
+
     private JavaFileAnalysis javaAnalysis(String filePath) {
         return new JavaFileAnalysis(
                 filePath,
@@ -231,6 +309,15 @@ class CommitResultServiceIntegrationTest {
         Integer claimedId = claimService.claimRandomCommit(task.getId())
                 .orElseThrow();
         return commitRepository.findById(claimedId).orElseThrow();
+    }
+
+    private void await(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(exception);
+        }
     }
 
     private static Path createTestDatabasePath() {
