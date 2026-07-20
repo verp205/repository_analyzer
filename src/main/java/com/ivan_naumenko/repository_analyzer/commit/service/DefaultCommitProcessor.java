@@ -7,11 +7,15 @@ import com.ivan_naumenko.repository_analyzer.diff.model.CommitDiff;
 import com.ivan_naumenko.repository_analyzer.diff.service.CommitResultService;
 import com.ivan_naumenko.repository_analyzer.diff.service.DiffService;
 import com.ivan_naumenko.repository_analyzer.git.service.GitService;
+import com.ivan_naumenko.repository_analyzer.javaanalysis.model.ChangedJavaFileAnalysis;
+import com.ivan_naumenko.repository_analyzer.javaanalysis.service.CommitJavaAnalysisService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
 
 @Service
@@ -25,6 +29,7 @@ public class DefaultCommitProcessor implements CommitProcessor {
     private final RepositoryCommitRepository commitRepository;
     private final GitService gitService;
     private final DiffService diffService;
+    private final CommitJavaAnalysisService commitJavaAnalysisService;
     private final CommitResultService commitResultService;
 
     @Override
@@ -42,21 +47,29 @@ public class DefaultCommitProcessor implements CommitProcessor {
                                     + " не найден в статусе PROCESSING"
                     ));
 
+            Path repositoryPath = gitService.getRepositoryPath(
+                    commit.repositoryUrl(),
+                    commit.branch()
+            );
             CommitDiff diff = diffService.readDiff(
-                    gitService.getRepositoryPath(
-                            commit.repositoryUrl(),
-                            commit.branch()
-                    ),
+                    repositoryPath,
                     commit.commitHash()
             );
-            commitResultService.complete(commitId, diff);
+            List<ChangedJavaFileAnalysis> javaAnalyses =
+                    commitJavaAnalysisService.analyze(
+                            repositoryPath,
+                            commit.commitHash(),
+                            diff
+                    );
+            commitResultService.complete(commitId, diff, javaAnalyses);
 
             log.info(
-                    "Коммит {} обработан: файлов {}, +{}, -{}",
+                    "Коммит {} обработан: файлов {}, +{}, -{}, Java-анализов {}",
                     commit.commitHash(),
                     diff.changedFiles().size(),
                     diff.totalAddedLines(),
-                    diff.totalDeletedLines()
+                    diff.totalDeletedLines(),
+                    javaAnalyses.size()
             );
         } catch (Exception exception) {
             handleFailure(commitId, exception);

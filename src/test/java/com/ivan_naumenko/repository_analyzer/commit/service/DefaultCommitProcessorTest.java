@@ -7,6 +7,7 @@ import com.ivan_naumenko.repository_analyzer.diff.model.CommitDiff;
 import com.ivan_naumenko.repository_analyzer.diff.service.CommitResultService;
 import com.ivan_naumenko.repository_analyzer.diff.service.DiffService;
 import com.ivan_naumenko.repository_analyzer.git.service.GitService;
+import com.ivan_naumenko.repository_analyzer.javaanalysis.service.CommitJavaAnalysisService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -44,6 +45,9 @@ class DefaultCommitProcessorTest {
     @Mock
     private CommitResultService commitResultService;
 
+    @Mock
+    private CommitJavaAnalysisService commitJavaAnalysisService;
+
     @Test
     void extractsAndSavesDiffForClaimedCommit() {
         DefaultCommitProcessor processor = processor();
@@ -64,10 +68,15 @@ class DefaultCommitProcessorTest {
                 .thenReturn(REPOSITORY_PATH);
         when(diffService.readDiff(REPOSITORY_PATH, COMMIT_HASH))
                 .thenReturn(diff);
+        when(commitJavaAnalysisService.analyze(
+                REPOSITORY_PATH,
+                COMMIT_HASH,
+                diff
+        )).thenReturn(List.of());
 
         processor.process(COMMIT_ID);
 
-        verify(commitResultService).complete(COMMIT_ID, diff);
+        verify(commitResultService).complete(COMMIT_ID, diff, List.of());
         verify(commitResultService, never()).fail(eq(COMMIT_ID), any());
     }
 
@@ -89,7 +98,56 @@ class DefaultCommitProcessorTest {
         processor.process(COMMIT_ID);
 
         verify(commitResultService).fail(COMMIT_ID, failure);
-        verify(commitResultService, never()).complete(eq(COMMIT_ID), any());
+        verify(commitJavaAnalysisService, never()).analyze(
+                any(),
+                any(),
+                any()
+        );
+        verify(commitResultService, never()).complete(
+                eq(COMMIT_ID),
+                any(),
+                any()
+        );
+    }
+
+    @Test
+    void marksCommitAsFailedWhenJavaAnalysisCannotBeCompleted() {
+        DefaultCommitProcessor processor = processor();
+        CommitProcessingData data = processingData();
+        CommitDiff diff = new CommitDiff(
+                COMMIT_HASH,
+                null,
+                List.of(),
+                0,
+                0,
+                ""
+        );
+        IllegalStateException failure = new IllegalStateException(
+                "java analysis failed"
+        );
+        when(commitRepository.findProcessingData(
+                COMMIT_ID,
+                CommitProcessingStatus.PROCESSING
+        )).thenReturn(Optional.of(data));
+        when(gitService.getRepositoryPath(REPOSITORY_URL, BRANCH))
+                .thenReturn(REPOSITORY_PATH);
+        when(diffService.readDiff(REPOSITORY_PATH, COMMIT_HASH))
+                .thenReturn(diff);
+        when(commitJavaAnalysisService.analyze(
+                REPOSITORY_PATH,
+                COMMIT_HASH,
+                diff
+        )).thenThrow(failure);
+        when(commitResultService.fail(COMMIT_ID, failure)).thenReturn(true);
+
+        processor.process(COMMIT_ID);
+
+        verify(commitResultService).fail(COMMIT_ID, failure);
+        verify(commitResultService, never()).complete(
+                eq(COMMIT_ID),
+                any(),
+                any()
+        );
     }
 
     private DefaultCommitProcessor processor() {
@@ -97,6 +155,7 @@ class DefaultCommitProcessorTest {
                 commitRepository,
                 gitService,
                 diffService,
+                commitJavaAnalysisService,
                 commitResultService
         );
     }

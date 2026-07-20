@@ -6,13 +6,21 @@ import com.ivan_naumenko.repository_analyzer.commit.repository.RepositoryCommitR
 import com.ivan_naumenko.repository_analyzer.diff.model.ChangedFileEntity;
 import com.ivan_naumenko.repository_analyzer.diff.model.CommitDiffEntity;
 import com.ivan_naumenko.repository_analyzer.diff.model.CommitDiff;
+import com.ivan_naumenko.repository_analyzer.diff.model.FileChangeType;
 import com.ivan_naumenko.repository_analyzer.diff.repository.CommitDiffRepository;
+import com.ivan_naumenko.repository_analyzer.javaanalysis.entity.JavaFileAnalysisEntity;
+import com.ivan_naumenko.repository_analyzer.javaanalysis.mapper.JavaAnalysisMapper;
+import com.ivan_naumenko.repository_analyzer.javaanalysis.model.ChangedJavaFileAnalysis;
+import com.ivan_naumenko.repository_analyzer.javaanalysis.repository.JavaFileAnalysisRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -22,11 +30,21 @@ public class CommitResultService {
 
     private final RepositoryCommitRepository commitRepository;
     private final CommitDiffRepository diffRepository;
+    private final JavaAnalysisMapper javaAnalysisMapper;
+    private final JavaFileAnalysisRepository javaAnalysisRepository;
 
     @Transactional
-    public void complete(Integer commitId, CommitDiff diff) {
+    public void complete(
+            Integer commitId,
+            CommitDiff diff,
+            List<ChangedJavaFileAnalysis> javaAnalyses
+    ) {
         Objects.requireNonNull(commitId, "commitId не должен быть null");
         Objects.requireNonNull(diff, "diff не должен быть null");
+        Objects.requireNonNull(
+                javaAnalyses,
+                "javaAnalyses не должен быть null"
+        );
 
         RepositoryCommit commit = commitRepository.getReferenceById(commitId);
         if (!commit.getCommitHash().equals(diff.commitHash())) {
@@ -36,7 +54,8 @@ public class CommitResultService {
         }
 
         CommitDiffEntity entity = toEntity(commit, diff);
-        diffRepository.save(entity);
+        diffRepository.saveAndFlush(entity);
+        saveJavaAnalyses(entity, javaAnalyses);
 
         int updatedRows = commitRepository.finishProcessingIfCurrent(
                 commitId,
@@ -51,6 +70,68 @@ public class CommitResultService {
                     "Коммит " + commitId + " больше не находится в PROCESSING"
             );
         }
+    }
+
+    private void saveJavaAnalyses(
+            CommitDiffEntity diff,
+            List<ChangedJavaFileAnalysis> javaAnalyses
+    ) {
+        Set<Integer> analyzedPositions = new HashSet<>();
+        List<JavaFileAnalysisEntity> entities = javaAnalyses.stream()
+                .map(javaAnalysis -> {
+                    int position = javaAnalysis.filePosition();
+                    if (position >= diff.getChangedFiles().size()) {
+                        throw new IllegalArgumentException(
+                                "Позиция Java-анализа выходит за границы diff: "
+                                        + position
+                        );
+                    }
+                    if (!analyzedPositions.add(position)) {
+                        throw new IllegalArgumentException(
+                                "Java-файл с позицией "
+                                        + position
+                                        + " проанализирован повторно"
+                        );
+                    }
+
+                    ChangedFileEntity changedFile = diff.getChangedFiles()
+                            .get(position);
+                    if (!requiresJavaAnalysis(changedFile)) {
+                        throw new IllegalArgumentException(
+                                "Файл с позицией "
+                                        + position
+                                        + " не требует Java-анализа"
+                        );
+                    }
+
+                    return javaAnalysisMapper.toEntity(
+                            changedFile,
+                            javaAnalysis.analysis()
+                    );
+                })
+                .toList();
+
+        for (int position = 0;
+             position < diff.getChangedFiles().size();
+             position++) {
+            ChangedFileEntity changedFile = diff.getChangedFiles()
+                    .get(position);
+            if (requiresJavaAnalysis(changedFile)
+                    && !analyzedPositions.contains(position)) {
+                throw new IllegalArgumentException(
+                        "Отсутствует Java-анализ файла с позицией "
+                                + position
+                );
+            }
+        }
+
+        javaAnalysisRepository.saveAll(entities);
+    }
+
+    private boolean requiresJavaAnalysis(ChangedFileEntity changedFile) {
+        return changedFile.isJavaFile()
+                && changedFile.getChangeType() != FileChangeType.DELETE
+                && changedFile.getNewPath() != null;
     }
 
     @Transactional

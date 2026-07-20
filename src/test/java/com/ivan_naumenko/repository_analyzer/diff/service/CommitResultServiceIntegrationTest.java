@@ -15,6 +15,8 @@ import com.ivan_naumenko.repository_analyzer.diff.model.CommitDiff;
 import com.ivan_naumenko.repository_analyzer.diff.model.FileChangeType;
 import com.ivan_naumenko.repository_analyzer.diff.repository.CommitDiffRepository;
 import com.ivan_naumenko.repository_analyzer.git.model.GitCommit;
+import com.ivan_naumenko.repository_analyzer.javaanalysis.model.ChangedJavaFileAnalysis;
+import com.ivan_naumenko.repository_analyzer.javaanalysis.model.JavaFileAnalysis;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +34,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
@@ -104,7 +107,14 @@ class CommitResultServiceIntegrationTest {
                 changedFile.patch()
         );
 
-        resultService.complete(commit.getId(), diff);
+        resultService.complete(
+                commit.getId(),
+                diff,
+                List.of(new ChangedJavaFileAnalysis(
+                        0,
+                        javaAnalysis(changedFile.newPath())
+                ))
+        );
 
         RepositoryCommit completed = commitRepository
                 .findById(commit.getId())
@@ -149,6 +159,58 @@ class CommitResultServiceIntegrationTest {
         );
         assertTrue(failed.getLastError().contains("cannot read diff"));
         assertFalse(diffRepository.existsById(commit.getId()));
+    }
+
+    @Test
+    void rollsBackDiffWhenRequiredJavaAnalysisIsMissing() {
+        RepositoryCommit commit = createAndClaimCommit();
+        ChangedFile changedFile = new ChangedFile(
+                "src/Sample.java",
+                "src/Sample.java",
+                FileChangeType.MODIFY,
+                2,
+                1,
+                true,
+                "@@ -1 +1,2 @@"
+        );
+        CommitDiff diff = new CommitDiff(
+                COMMIT_HASH,
+                "c".repeat(40),
+                List.of(changedFile),
+                2,
+                1,
+                changedFile.patch()
+        );
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> resultService.complete(
+                        commit.getId(),
+                        diff,
+                        List.of()
+                )
+        );
+
+        assertFalse(diffRepository.existsById(commit.getId()));
+        RepositoryCommit unchanged = commitRepository
+                .findById(commit.getId())
+                .orElseThrow();
+        assertEquals(
+                CommitProcessingStatus.PROCESSING,
+                unchanged.getProcessingStatus()
+        );
+    }
+
+    private JavaFileAnalysis javaAnalysis(String filePath) {
+        return new JavaFileAnalysis(
+                filePath,
+                "",
+                List.of(),
+                List.of(),
+                1,
+                true,
+                List.of()
+        );
     }
 
     private RepositoryCommit createAndClaimCommit() {
