@@ -9,7 +9,11 @@ import org.springframework.validation.annotation.Validated;
 @Validated
 @ConfigurationProperties(prefix = "repository-analyzer.llm")
 public record LlmProperties(
-        boolean enabled,
+        @NotBlank
+        String provider,
+
+        @NotBlank
+        String providerId,
 
         @NotBlank
         String baseUrl,

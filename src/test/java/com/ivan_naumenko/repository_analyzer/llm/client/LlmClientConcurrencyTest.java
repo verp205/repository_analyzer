@@ -22,19 +22,27 @@ class LlmClientConcurrencyTest {
         AtomicInteger active = new AtomicInteger();
         AtomicInteger maximumActive = new AtomicInteger();
         CountDownLatch release = new CountDownLatch(1);
-        LlmTransport transport = prompt -> {
-            int current = active.incrementAndGet();
-            maximumActive.accumulateAndGet(current, Math::max);
-            try {
-                if (!release.await(5, TimeUnit.SECONDS)) {
-                    throw new IllegalStateException("test timeout");
+        LlmTransport transport = new LlmTransport() {
+            @Override
+            public String cacheNamespace() {
+                return "test-provider:test-model";
+            }
+
+            @Override
+            public String generate(String prompt) {
+                int current = active.incrementAndGet();
+                maximumActive.accumulateAndGet(current, Math::max);
+                try {
+                    if (!release.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("test timeout");
+                    }
+                    return "response";
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(exception);
+                } finally {
+                    active.decrementAndGet();
                 }
-                return "response";
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException(exception);
-            } finally {
-                active.decrementAndGet();
             }
         };
         LlmClient client = new LlmClient(transport, properties(2));
@@ -58,7 +66,8 @@ class LlmClientConcurrencyTest {
 
     private LlmProperties properties(int maxConcurrentRequests) {
         return new LlmProperties(
-                false,
+                "stub",
+                "test-provider",
                 "http://localhost:1234",
                 "/v1/chat/completions",
                 "test-model",

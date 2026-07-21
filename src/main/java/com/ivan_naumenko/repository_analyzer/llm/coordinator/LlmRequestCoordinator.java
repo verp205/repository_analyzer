@@ -31,7 +31,13 @@ public class LlmRequestCoordinator {
             ReportAudience audience
     ) {
         Objects.requireNonNull(audience, "audience не должен быть null");
-        String promptHash = promptHashService.calculate(prompt);
+        String cacheNamespace = Objects.requireNonNull(
+                llmClient.cacheNamespace(),
+                "LLM cacheNamespace не должен быть null"
+        );
+        String promptHash = promptHashService.calculate(
+                cacheNamespace + "\n" + prompt
+        );
 
         Optional<String> cached = cacheService.findResponse(promptHash);
         if (cached.isPresent()) {
@@ -62,6 +68,7 @@ public class LlmRequestCoordinator {
             String stored = writeCoordinator.execute(
                     () -> cacheService.saveResponse(
                             promptHash,
+                            cacheNamespace,
                             prompt,
                             generated,
                             audience

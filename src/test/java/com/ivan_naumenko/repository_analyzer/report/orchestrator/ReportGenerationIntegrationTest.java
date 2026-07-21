@@ -98,7 +98,7 @@ class ReportGenerationIntegrationTest {
                         + TEST_DATABASE
                         + "?foreign_keys=on&journal_mode=WAL&busy_timeout=10000"
         );
-        registry.add("repository-analyzer.llm.enabled", () -> false);
+        registry.add("repository-analyzer.llm.provider", () -> "stub");
     }
 
     @BeforeEach

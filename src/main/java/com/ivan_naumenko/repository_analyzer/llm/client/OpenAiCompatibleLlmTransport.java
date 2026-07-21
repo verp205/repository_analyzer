@@ -13,8 +13,8 @@ import java.util.List;
 @Component
 @ConditionalOnProperty(
         prefix = "repository-analyzer.llm",
-        name = "enabled",
-        havingValue = "true"
+        name = "provider",
+        havingValue = "openai-compatible"
 )
 public class OpenAiCompatibleLlmTransport implements LlmTransport {
 
@@ -29,6 +29,14 @@ public class OpenAiCompatibleLlmTransport implements LlmTransport {
         this.restClient = restClientBuilder
                 .baseUrl(properties.baseUrl())
                 .build();
+    }
+
+    @Override
+    public String cacheNamespace() {
+        return "%s:%s".formatted(
+                properties.providerId(),
+                properties.model()
+        );
     }
 
     @Override

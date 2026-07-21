@@ -9,13 +9,18 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 @ConditionalOnProperty(
         prefix = "repository-analyzer.llm",
-        name = "enabled",
-        havingValue = "false",
+        name = "provider",
+        havingValue = "stub",
         matchIfMissing = true
 )
 public class StubLlmTransport implements LlmTransport {
 
     private final PromptHashService promptHashService;
+
+    @Override
+    public String cacheNamespace() {
+        return "stub:v1";
+    }
 
     @Override
     public String generate(String prompt) {
@@ -34,7 +39,7 @@ public class StubLlmTransport implements LlmTransport {
                 Prompt hash: `%s`
 
                 Для настоящего смыслового анализа включите
-                `repository-analyzer.llm.enabled=true` и укажите параметры
+                `repository-analyzer.llm.provider=openai-compatible` и укажите параметры
                 OpenAI-compatible inference-сервера.
                 """.formatted(hash);
     }

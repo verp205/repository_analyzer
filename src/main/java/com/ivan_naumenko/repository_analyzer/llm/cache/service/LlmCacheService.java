@@ -36,20 +36,24 @@ public class LlmCacheService {
     @Transactional
     public String saveResponse(
             String promptHash,
+            String cacheNamespace,
             String prompt,
             String response,
             ReportAudience audience
     ) {
         validateHash(promptHash);
+        validateText(cacheNamespace, "cacheNamespace");
         validateText(prompt, "prompt");
         validateText(response, "response");
         Objects.requireNonNull(audience, "audience не должен быть null");
 
-        String calculatedHash = promptHashService.calculate(prompt);
+        String calculatedHash = promptHashService.calculate(
+                cacheNamespace + "\n" + prompt
+        );
 
         if (!promptHash.equals(calculatedHash)) {
             throw new IllegalArgumentException(
-                    "promptHash не соответствует переданному prompt"
+                    "promptHash не соответствует провайдеру и prompt"
             );
         }
 

@@ -12,7 +12,24 @@ import java.util.Objects;
 @Service
 public class PromptFactory {
 
-    private static final String PROMPT_VERSION = "v1";
+    private static final String PROMPT_VERSION = "v2";
+
+    private static final String LANGUAGE_RULES = """
+            Сформируй весь ответ исключительно на русском языке.
+
+            На русском языке должны быть написаны:
+
+            - заголовки и названия разделов;
+            - пояснения и выводы;
+            - описания рисков;
+            - рекомендации и проверки;
+            - содержимое таблиц, кроме технических идентификаторов.
+
+            Не переводи имена классов, методов, файлов, библиотек, API,
+            фрагменты кода и другие технические идентификаторы.
+            Английский язык допустим только внутри таких идентификаторов
+            или при точном цитировании текста из анализируемого коммита.
+            """;
 
     private static final String BASE_TASK = """
             Ты анализируешь ОДИН конкретный commit, а не весь репозиторий.
@@ -358,6 +375,9 @@ public class PromptFactory {
         return """
                 PROMPT_VERSION: %s
 
+                RESPONSE_LANGUAGE:
+                %s
+
                 BASE_TASK:
                 %s
 
@@ -375,6 +395,7 @@ public class PromptFactory {
                 </TECHNICAL_CONTEXT>
                 """.formatted(
                 PROMPT_VERSION,
+                LANGUAGE_RULES,
                 BASE_TASK,
                 instructionFor(audience),
                 COMMON_RULES,

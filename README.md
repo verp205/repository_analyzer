@@ -1,28 +1,56 @@
 # Repository Analyzer
 
-Backend анализирует историю Java-репозитория, параллельно обрабатывает коммиты,
-сохраняет технические результаты в SQLite и формирует ролевой отчёт через LLM.
+Анализатор истории Java-репозиториев с формированием отчёта через LLM.
 
-## Запуск
+## Как запустить
 
-Требуется JDK 21.
+Понадобятся JDK 21, Node.js и npm.
+
+1. Запустите backend из корня проекта:
+
+   ```bash
+   ./mvnw spring-boot:run
+   ```
+
+2. В новом окне терминала запустите frontend:
+
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+
+3. Откройте <http://localhost:5173>, вставьте ссылку на Git-репозиторий, укажите ветку, выберите вид отчёта и нажмите «Начать анализ».
+
+По умолчанию используется тестовая LLM-заглушка, поэтому приложение запускается без API-ключа.
+
+## Как поменять модель
+
+Настройки находятся в `src/main/resources/application.properties`.
+
+Для OpenAI или другого OpenAI-compatible сервера укажите:
+
+```properties
+repository-analyzer.llm.provider=openai-compatible
+repository-analyzer.llm.provider-id=openai
+repository-analyzer.llm.base-url=https://api.openai.com
+repository-analyzer.llm.chat-path=/v1/chat/completions
+repository-analyzer.llm.model=gpt-5.6-sol
+repository-analyzer.llm.api-key=${LLM_API_KEY:}
+repository-analyzer.llm.max-concurrent-requests=2
+```
+
+Чтобы выбрать другую модель, поменяйте значение:
+
+```properties
+repository-analyzer.llm.model=название-модели
+```
+
+API-ключ не сохраняйте в проекте. Перед запуском передайте его через переменную окружения:
 
 ```bash
+export LLM_API_KEY=ваш-api-ключ
 ./mvnw spring-boot:run
 ```
 
-После запуска доступны:
-
-- Swagger UI: <http://localhost:8080/swagger-ui.html>
-- OpenAPI: <http://localhost:8080/v3/api-docs>
-- Health check: <http://localhost:8080/actuator/health>
-
-По умолчанию включена локальная LLM-заглушка. Поэтому полный сценарий можно
-проверить без API-ключа и inference-сервера.
-
-
-## Проверка проекта
-
-```bash
-./mvnw test
-```
+После изменения настроек перезапустите backend.

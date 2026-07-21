@@ -44,4 +44,8 @@ public class LlmClient {
             }
         }
     }
+
+    public String cacheNamespace() {
+        return transport.cacheNamespace();
+    }
 }

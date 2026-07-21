@@ -36,7 +36,11 @@ class PromptFactoryTest {
 
         String prompt = factory.build(context, ReportAudience.SECURITY);
 
-        assertTrue(prompt.contains("PROMPT_VERSION: v1"));
+        assertTrue(prompt.contains("PROMPT_VERSION: v2"));
+        assertTrue(prompt.contains("RESPONSE_LANGUAGE:"));
+        assertTrue(prompt.contains(
+                "Сформируй весь ответ исключительно на русском языке"
+        ));
         assertTrue(prompt.contains("AUDIENCE_INSTRUCTION:"));
         assertTrue(prompt.contains("безопасности"));
         assertTrue(prompt.contains("<TECHNICAL_CONTEXT>"));

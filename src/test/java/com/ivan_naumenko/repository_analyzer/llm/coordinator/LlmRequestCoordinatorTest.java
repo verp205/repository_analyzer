@@ -32,6 +32,8 @@ import static org.mockito.Mockito.when;
 class LlmRequestCoordinatorTest {
 
     private static final String PROMPT = "Analyze commit";
+    private static final String CACHE_NAMESPACE = "test-provider:test-model";
+    private static final String HASH_INPUT = CACHE_NAMESPACE + "\n" + PROMPT;
     private static final String HASH = "a".repeat(64);
     private static final String RESPONSE = "Analysis result";
 
@@ -46,7 +48,7 @@ class LlmRequestCoordinatorTest {
 
     @Test
     void returnsCachedResponseWithoutCallingLlm() {
-        when(hashService.calculate(PROMPT)).thenReturn(HASH);
+        when(hashService.calculate(HASH_INPUT)).thenReturn(HASH);
         when(cacheService.findResponse(HASH))
                 .thenReturn(Optional.of(RESPONSE));
 
@@ -61,7 +63,7 @@ class LlmRequestCoordinatorTest {
 
     @Test
     void sendsOneLlmRequestForTenConcurrentCallers() throws Exception {
-        when(hashService.calculate(PROMPT)).thenReturn(HASH);
+        when(hashService.calculate(HASH_INPUT)).thenReturn(HASH);
         AtomicReference<String> cachedResponse = new AtomicReference<>();
         when(cacheService.findResponse(HASH)).thenAnswer(
                 ignored -> Optional.ofNullable(cachedResponse.get())
@@ -79,6 +81,7 @@ class LlmRequestCoordinatorTest {
         });
         when(cacheService.saveResponse(
                 HASH,
+                CACHE_NAMESPACE,
                 PROMPT,
                 RESPONSE,
                 ReportAudience.SECURITY
@@ -114,6 +117,7 @@ class LlmRequestCoordinatorTest {
         verify(llmClient).generate(PROMPT);
         verify(cacheService).saveResponse(
                 HASH,
+                CACHE_NAMESPACE,
                 PROMPT,
                 RESPONSE,
                 ReportAudience.SECURITY
@@ -122,13 +126,14 @@ class LlmRequestCoordinatorTest {
 
     @Test
     void removesFailedRequestSoItCanBeRetried() {
-        when(hashService.calculate(PROMPT)).thenReturn(HASH);
+        when(hashService.calculate(HASH_INPUT)).thenReturn(HASH);
         when(cacheService.findResponse(HASH)).thenReturn(Optional.empty());
         when(llmClient.generate(PROMPT))
                 .thenThrow(new IllegalStateException("first failure"))
                 .thenReturn(RESPONSE);
         when(cacheService.saveResponse(
                 HASH,
+                CACHE_NAMESPACE,
                 PROMPT,
                 RESPONSE,
                 ReportAudience.ANALYST
@@ -150,6 +155,7 @@ class LlmRequestCoordinatorTest {
     }
 
     private LlmRequestCoordinator coordinator() {
+        when(llmClient.cacheNamespace()).thenReturn(CACHE_NAMESPACE);
         return new LlmRequestCoordinator(
                 cacheService,
                 hashService,

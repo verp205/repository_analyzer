@@ -26,6 +26,7 @@ class LlmCacheServiceTest {
 
     private static final String PROMPT = "Analyze this commit";
     private static final String RESPONSE = "No critical risks found";
+    private static final String CACHE_NAMESPACE = "test-provider:test-model";
 
     @Mock
     private LlmCacheRepository repository;
@@ -35,7 +36,7 @@ class LlmCacheServiceTest {
 
     @Test
     void returnsEmptyWhenResponseIsNotCached() {
-        String promptHash = promptHashService.calculate(PROMPT);
+        String promptHash = promptHash(PROMPT);
         when(repository.findById(promptHash)).thenReturn(Optional.empty());
 
         Optional<String> result = service().findResponse(promptHash);
@@ -45,7 +46,7 @@ class LlmCacheServiceTest {
 
     @Test
     void returnsCachedResponse() {
-        String promptHash = promptHashService.calculate(PROMPT);
+        String promptHash = promptHash(PROMPT);
         LlmCacheEntry entry = entry(promptHash, PROMPT, RESPONSE);
         when(repository.findById(promptHash))
                 .thenReturn(Optional.of(entry));
@@ -58,11 +59,12 @@ class LlmCacheServiceTest {
 
     @Test
     void savesCompletedResponse() {
-        String promptHash = promptHashService.calculate(PROMPT);
+        String promptHash = promptHash(PROMPT);
         when(repository.findById(promptHash)).thenReturn(Optional.empty());
 
         String result = service().saveResponse(
                 promptHash,
+                CACHE_NAMESPACE,
                 PROMPT,
                 RESPONSE,
                 ReportAudience.SECURITY
@@ -83,13 +85,14 @@ class LlmCacheServiceTest {
 
     @Test
     void keepsFirstResponseWhenEntryAlreadyExists() {
-        String promptHash = promptHashService.calculate(PROMPT);
+        String promptHash = promptHash(PROMPT);
         LlmCacheEntry existing = entry(promptHash, PROMPT, RESPONSE);
         when(repository.findById(promptHash))
                 .thenReturn(Optional.of(existing));
 
         String result = service().saveResponse(
                 promptHash,
+                CACHE_NAMESPACE,
                 PROMPT,
                 "Another response",
                 ReportAudience.SECURITY
@@ -100,13 +103,27 @@ class LlmCacheServiceTest {
     }
 
     @Test
-    void rejectsHashThatDoesNotBelongToPrompt() {
-        String anotherHash = promptHashService.calculate("another prompt");
+    void rejectsHashThatDoesNotBelongToNamespaceAndPrompt() {
+        String anotherHash = promptHash("another prompt");
+        String anotherProviderHash = promptHashService.calculate(
+                "corporate:other-model\n" + PROMPT
+        );
 
         assertThrows(
                 IllegalArgumentException.class,
                 () -> service().saveResponse(
                         anotherHash,
+                        CACHE_NAMESPACE,
+                        PROMPT,
+                        RESPONSE,
+                        ReportAudience.DEVELOPER
+                )
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service().saveResponse(
+                        anotherProviderHash,
+                        CACHE_NAMESPACE,
                         PROMPT,
                         RESPONSE,
                         ReportAudience.DEVELOPER
@@ -117,7 +134,7 @@ class LlmCacheServiceTest {
 
     @Test
     void rejectsInvalidArguments() {
-        String promptHash = promptHashService.calculate(PROMPT);
+        String promptHash = promptHash(PROMPT);
 
         assertThrows(
                 IllegalArgumentException.class,
@@ -128,6 +145,7 @@ class LlmCacheServiceTest {
                 () -> service().saveResponse(
                         promptHash,
                         " ",
+                        PROMPT,
                         RESPONSE,
                         ReportAudience.ANALYST
                 )
@@ -136,6 +154,17 @@ class LlmCacheServiceTest {
                 IllegalArgumentException.class,
                 () -> service().saveResponse(
                         promptHash,
+                        CACHE_NAMESPACE,
+                        " ",
+                        RESPONSE,
+                        ReportAudience.ANALYST
+                )
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service().saveResponse(
+                        promptHash,
+                        CACHE_NAMESPACE,
                         PROMPT,
                         " ",
                         ReportAudience.ANALYST
@@ -145,6 +174,7 @@ class LlmCacheServiceTest {
                 NullPointerException.class,
                 () -> service().saveResponse(
                         promptHash,
+                        CACHE_NAMESPACE,
                         PROMPT,
                         RESPONSE,
                         null
@@ -154,7 +184,7 @@ class LlmCacheServiceTest {
 
     @Test
     void rejectsExistingEntryWithConflictingMetadata() {
-        String promptHash = promptHashService.calculate(PROMPT);
+        String promptHash = promptHash(PROMPT);
         LlmCacheEntry differentPrompt = entry(
                 promptHash,
                 "Different prompt",
@@ -167,6 +197,7 @@ class LlmCacheServiceTest {
                 IllegalStateException.class,
                 () -> service().saveResponse(
                         promptHash,
+                        CACHE_NAMESPACE,
                         PROMPT,
                         RESPONSE,
                         ReportAudience.SECURITY
@@ -186,6 +217,7 @@ class LlmCacheServiceTest {
                 IllegalStateException.class,
                 () -> service().saveResponse(
                         promptHash,
+                        CACHE_NAMESPACE,
                         PROMPT,
                         RESPONSE,
                         ReportAudience.SECURITY
@@ -195,6 +227,10 @@ class LlmCacheServiceTest {
 
     private LlmCacheService service() {
         return new LlmCacheService(repository, promptHashService);
+    }
+
+    private String promptHash(String prompt) {
+        return promptHashService.calculate(CACHE_NAMESPACE + "\n" + prompt);
     }
 
     private LlmCacheEntry entry(

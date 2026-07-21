@@ -1,0 +1,686 @@
+import {
+  AlertCircle,
+  BookOpenText,
+  CheckCircle2,
+  GitFork,
+  Moon,
+  RotateCcw,
+  Sparkles,
+  Sun,
+} from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { flushSync } from "react-dom";
+import { AnalysisTimeline } from "@/components/AnalysisTimeline";
+import { HelpAccordion } from "@/components/HelpAccordion";
+import { InsightsPanel } from "@/components/InsightsPanel";
+import { RecentAnalyses } from "@/components/RecentAnalyses";
+import {
+  RepositoryForm,
+  type AnalysisRequest,
+} from "@/components/RepositoryForm";
+import { ReportPanel } from "@/components/ReportPanel";
+import { FlowHoverButton } from "@/components/ui/flow-hover-button";
+import { api } from "@/lib/api";
+import type {
+  AnalysisProgress,
+  AnalysisReport,
+  AnalysisTask,
+  CommitClusters,
+  CommitGraph,
+  ReportAudience,
+  ReportEvent,
+} from "@/lib/types";
+import { repositoryName } from "@/lib/utils";
+
+type Theme = "light" | "dark";
+type ConnectionStatus = "checking" | "online" | "offline";
+type ThemeRipple = {
+  color: string;
+  nextTheme: Theme;
+  radius: number;
+  x: number;
+  y: number;
+};
+
+const hiddenHistoryKey = "repository-analyzer-hidden-history";
+
+interface ThemeViewTransition {
+  ready: Promise<void>;
+}
+
+type ViewTransitionDocument = Document & {
+  startViewTransition?: (callback: () => void) => ThemeViewTransition;
+};
+
+type ViewTransitionAnimationOptions = KeyframeAnimationOptions & {
+  pseudoElement: string;
+};
+
+function initialTheme(): Theme {
+  const saved = localStorage.getItem("repository-analyzer-theme");
+  if (saved === "light" || saved === "dark") return saved;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
+
+function initialHiddenTaskIds() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(hiddenHistoryKey) ?? "[]");
+    return Array.isArray(saved)
+      ? saved.filter((id): id is number => Number.isInteger(id))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export default function App() {
+  const [theme, setTheme] = useState<Theme>(initialTheme);
+  const [themeRipple, setThemeRipple] = useState<ThemeRipple | null>(null);
+  const [tasks, setTasks] = useState<AnalysisTask[]>([]);
+  const [hiddenTaskIds, setHiddenTaskIds] =
+    useState<number[]>(initialHiddenTaskIds);
+  const [task, setTask] = useState<AnalysisTask | null>(null);
+  const [progress, setProgress] = useState<AnalysisProgress | null>(null);
+  const [graph, setGraph] = useState<CommitGraph | null>(null);
+  const [clusters, setClusters] = useState<CommitClusters | null>(null);
+  const [report, setReport] = useState<AnalysisReport | null>(null);
+  const [liveContent, setLiveContent] = useState("");
+  const [audience, setAudience] = useState<ReportAudience>("DEVELOPER");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] =
+    useState<ConnectionStatus>("checking");
+  const reportRequestKey = useRef("");
+  const lastLiveCommit = useRef(0);
+  const taskId = task?.id ?? null;
+  const taskStatus = task?.status ?? null;
+  const reportId = report?.id ?? null;
+  const reportStatus = report?.status ?? null;
+
+  useLayoutEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    document.documentElement.style.colorScheme = theme;
+    localStorage.setItem("repository-analyzer-theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem(hiddenHistoryKey, JSON.stringify(hiddenTaskIds));
+  }, [hiddenTaskIds]);
+
+  const refreshTasks = useCallback(async () => {
+    try {
+      setTasks(await api.listTasks());
+      setConnectionStatus("online");
+    } catch {
+      setConnectionStatus("offline");
+    }
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    void api
+      .listTasks()
+      .then((nextTasks) => {
+        if (!disposed) {
+          setTasks(nextTasks);
+          setConnectionStatus("online");
+        }
+      })
+      .catch(() => {
+        if (!disposed) setConnectionStatus("offline");
+      });
+
+    const timer = setInterval(() => {
+      void api
+        .listTasks()
+        .then((nextTasks) => {
+          if (!disposed) {
+            setTasks(nextTasks);
+            setConnectionStatus("online");
+          }
+        })
+        .catch(() => {
+          if (!disposed) setConnectionStatus("offline");
+        });
+    }, 10_000);
+
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!taskId || taskStatus === "COMPLETED" || taskStatus === "FAILED") {
+      return;
+    }
+
+    let disposed = false;
+    const poll = async () => {
+      try {
+        const [freshTask, freshProgress] = await Promise.all([
+          api.getTask(taskId),
+          api.getProgress(taskId),
+        ]);
+        if (disposed) return;
+        setTask(freshTask);
+        setProgress(freshProgress);
+        if (freshTask.status === "COMPLETED" || freshTask.status === "FAILED") {
+          clearInterval(timer);
+          void refreshTasks();
+        }
+      } catch (caught) {
+        if (!disposed) setError(errorMessage(caught));
+      }
+    };
+
+    const timer = setInterval(() => void poll(), 1200);
+    void poll();
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [taskId, taskStatus, refreshTasks]);
+
+  useEffect(() => {
+    if (!taskId || taskStatus !== "COMPLETED") return;
+    const key = `${taskId}:${audience}`;
+    if (reportRequestKey.current === key) return;
+    reportRequestKey.current = key;
+
+    let disposed = false;
+    const prepareResults = async () => {
+      try {
+        const [nextGraph, nextClusters, nextReport] = await Promise.all([
+          api.getGraph(taskId),
+          api.getClusters(taskId),
+          api.createReport(taskId, audience),
+        ]);
+        if (disposed) return;
+        setGraph(nextGraph);
+        setClusters(nextClusters);
+        setReport(nextReport);
+        setLiveContent(nextReport.content || "");
+        lastLiveCommit.current = nextReport.processedCommits;
+      } catch (caught) {
+        if (!disposed) {
+          reportRequestKey.current = "";
+          setError(errorMessage(caught));
+        }
+      }
+    };
+
+    void prepareResults();
+    return () => {
+      disposed = true;
+    };
+  }, [taskId, taskStatus, audience]);
+
+  const refreshReport = useCallback(async (reportId: number) => {
+    const fresh = await api.getReport(reportId);
+    setReport(fresh);
+    if (fresh.content) setLiveContent(fresh.content);
+    lastLiveCommit.current = fresh.processedCommits;
+    return fresh;
+  }, []);
+
+  useEffect(() => {
+    if (!reportId || reportStatus === "COMPLETED" || reportStatus === "FAILED") {
+      return;
+    }
+
+    const source = new EventSource(api.reportEventsUrl(reportId));
+    const handleEvent = (message: MessageEvent<string>) => {
+      const event = JSON.parse(message.data) as ReportEvent;
+      setReport((current) =>
+        current
+          ? {
+              ...current,
+              processedCommits: event.processedCommits,
+              totalCommits: event.totalCommits || current.totalCommits,
+            }
+          : current,
+      );
+
+      if (event.type === "SUMMARY" && event.contentChunk) {
+        setLiveContent(event.contentChunk);
+        lastLiveCommit.current = 0;
+      }
+      if (
+        event.type === "PROGRESS" &&
+        event.contentChunk &&
+        event.processedCommits > lastLiveCommit.current
+      ) {
+        setLiveContent((current) => current + event.contentChunk);
+        lastLiveCommit.current = event.processedCommits;
+      }
+      if (event.type === "COMPLETED" || event.type === "FAILED") {
+        void refreshReport(event.reportId);
+      }
+    };
+
+    ["snapshot", "summary", "progress", "completed", "failed"].forEach(
+      (eventName) => source.addEventListener(eventName, handleEvent),
+    );
+
+    const timer = setInterval(() => {
+      void refreshReport(reportId).catch(() => undefined);
+    }, 1500);
+
+    return () => {
+      clearInterval(timer);
+      source.close();
+    };
+  }, [reportId, reportStatus, refreshReport]);
+
+  async function startAnalysis(request: AnalysisRequest) {
+    setSubmitting(true);
+    setError(null);
+    setAudience(request.audience);
+    setProgress(null);
+    setGraph(null);
+    setClusters(null);
+    setReport(null);
+    setLiveContent("");
+    reportRequestKey.current = "";
+    lastLiveCommit.current = 0;
+
+    try {
+      const created = await api.createTask(
+        request.repositoryUrl,
+        request.branch,
+      );
+      setTask(created);
+      setHiddenTaskIds((current) => current.filter((id) => id !== created.id));
+      void refreshTasks();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function retryTask() {
+    if (!task) return;
+    setError(null);
+    try {
+      const retried = await api.retryTask(task.id);
+      setTask(retried);
+      setGraph(null);
+      setClusters(null);
+      setReport(null);
+      reportRequestKey.current = "";
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }
+
+  async function retryReport() {
+    if (!report) return;
+    setError(null);
+    try {
+      const retried = await api.retryReport(report.id);
+      setReport(retried);
+      setLiveContent("");
+      lastLiveCommit.current = 0;
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }
+
+  async function openTask(selected: AnalysisTask) {
+    setTask(selected);
+    setProgress(null);
+    setGraph(null);
+    setClusters(null);
+    setReport(null);
+    setLiveContent("");
+    setError(null);
+    reportRequestKey.current = "";
+    try {
+      setProgress(await api.getProgress(selected.id));
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }
+
+  function toggleTheme(event: ReactMouseEvent<HTMLButtonElement>) {
+    if (themeRipple) return;
+    const nextTheme = theme === "light" ? "dark" : "light";
+    const startViewTransition = (document as ViewTransitionDocument)
+      .startViewTransition;
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+
+    if (reduceMotion) {
+      setTheme(nextTheme);
+      return;
+    }
+
+    const x = event.clientX;
+    const y = event.clientY;
+    const radius = Math.hypot(
+      Math.max(x, window.innerWidth - x),
+      Math.max(y, window.innerHeight - y),
+    );
+
+    if (!startViewTransition) {
+      setThemeRipple({
+        color: nextTheme === "dark" ? "#050607" : "#e7e9ec",
+        nextTheme,
+        radius,
+        x,
+        y,
+      });
+      return;
+    }
+
+    const transition = startViewTransition.call(document, () => {
+      flushSync(() => setTheme(nextTheme));
+    });
+
+    void transition.ready
+      .then(() => {
+        document.documentElement.animate(
+          {
+            clipPath: [
+              `circle(0px at ${x}px ${y}px)`,
+              `circle(${radius}px at ${x}px ${y}px)`,
+            ],
+          },
+          {
+            duration: 720,
+            easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+            pseudoElement: "::view-transition-new(root)",
+          } as ViewTransitionAnimationOptions,
+        );
+      })
+      .catch(() => undefined);
+  }
+
+  const hasWorkspace = Boolean(task);
+  const insightsReady = Boolean(graph && clusters);
+  const visibleTasks = tasks.filter((item) =>
+    !hiddenTaskIds.includes(item.id),
+  );
+  const hasHiddenTasks = tasks.some((item) =>
+    hiddenTaskIds.includes(item.id),
+  );
+
+  return (
+    <div className="tech-canvas min-h-screen text-ink">
+      <AnimatePresence>
+        {themeRipple && (
+          <motion.div
+            animate={{ opacity: 1, scale: 1 }}
+            aria-hidden="true"
+            className="pointer-events-none fixed z-[10000] rounded-full"
+            exit={{ opacity: 0 }}
+            initial={{ opacity: 1, scale: 0 }}
+            onAnimationComplete={() => {
+              if (theme === themeRipple.nextTheme) return;
+              flushSync(() => setTheme(themeRipple.nextTheme));
+              window.requestAnimationFrame(() => setThemeRipple(null));
+            }}
+            style={{
+              backgroundColor: themeRipple.color,
+              height: themeRipple.radius * 2,
+              left: themeRipple.x - themeRipple.radius,
+              top: themeRipple.y - themeRipple.radius,
+              width: themeRipple.radius * 2,
+            }}
+            transition={{ duration: 0.68, ease: [0.22, 1, 0.36, 1] }}
+          />
+        )}
+      </AnimatePresence>
+      <div className="mx-auto grid min-h-screen max-w-[1680px] lg:grid-cols-[310px_minmax(0,1fr)]">
+        <aside className="flex flex-col border-b border-line bg-sidebar px-6 py-6 lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r lg:px-7 lg:py-8">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="relative flex size-10 items-center justify-center rounded-2xl border border-line bg-panel shadow-soft">
+                <GitFork className="size-5 text-accent" />
+                <Sparkles className="absolute -right-1 -top-1 size-3.5 text-accent" />
+              </span>
+              <div>
+                <p className="font-display text-[15px] font-semibold leading-tight">
+                  Анализатор
+                </p>
+                <p className="text-xs text-muted">репозиториев</p>
+              </div>
+            </div>
+            <button
+              aria-label={`Включить ${theme === "light" ? "тёмную" : "светлую"} тему`}
+              className="icon-button"
+              disabled={Boolean(themeRipple)}
+              onClick={toggleTheme}
+              type="button"
+            >
+              {theme === "light" ? (
+                <Moon className="size-4" />
+              ) : (
+                <Sun className="size-4" />
+              )}
+            </button>
+          </div>
+
+          <RecentAnalyses
+            className="hidden min-h-0 flex-1 lg:flex lg:flex-col"
+            hasHiddenTasks={hasHiddenTasks}
+            onClear={() =>
+              setHiddenTaskIds((current) => [
+                ...new Set([...current, ...tasks.map((item) => item.id)]),
+              ])
+            }
+            onOpen={(item) => void openTask(item)}
+            onRestore={() => setHiddenTaskIds([])}
+            tasks={visibleTasks}
+          />
+
+          <div className="mt-auto hidden max-h-[46vh] min-h-0 overflow-y-auto pr-1 lg:block">
+            <HelpAccordion />
+          </div>
+
+          <div className="diagonal-card mt-8 hidden shrink-0 lg:mt-6 lg:block">
+            <p className="text-sm font-semibold text-ink">dev. Ivan Naumenko</p>
+            <p className="mt-4 text-[10px] uppercase tracking-[0.16em] text-muted">
+              © 2026 Иван Науменко
+            </p>
+          </div>
+        </aside>
+
+        <main className="relative overflow-hidden px-4 py-5 sm:px-7 sm:py-7 xl:px-12 xl:py-10">
+          <div className="ambient-glow" />
+          <div className="relative mx-auto max-w-[1180px]">
+            <header className="mb-8 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2 text-xs font-medium text-muted">
+                <span className="relative flex size-2">
+                  {connectionStatus === "online" && (
+                    <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-40" />
+                  )}
+                  <span
+                    className={`relative inline-flex size-2 rounded-full ${
+                      connectionStatus === "online"
+                        ? "bg-success"
+                        : connectionStatus === "offline"
+                          ? "bg-red-400"
+                          : "bg-amber-400"
+                    }`}
+                  />
+                </span>
+                {connectionStatus === "online"
+                  ? "Сервер подключён"
+                  : connectionStatus === "offline"
+                    ? "Сервер недоступен"
+                    : "Проверяем соединение"}
+              </div>
+              {task && (
+                <span className="hidden rounded-full border border-line bg-panel/70 px-3 py-1.5 font-mono text-[10px] text-muted sm:inline">
+                  задача/{task.id} · {task.branch}
+                </span>
+              )}
+            </header>
+
+            <section className="hero-card">
+              <div aria-hidden="true" className="glass-orb" />
+              <div className="relative z-10 w-full">
+                <p className="eyebrow mb-4">Новый анализ</p>
+                <RepositoryForm loading={submitting} onSubmit={startAnalysis} />
+              </div>
+            </section>
+
+            <div className="soft-panel mt-4 px-5 pb-5 lg:hidden">
+              <RecentAnalyses
+                hasHiddenTasks={hasHiddenTasks}
+                onClear={() =>
+                  setHiddenTaskIds((current) => [
+                    ...new Set([...current, ...tasks.map((item) => item.id)]),
+                  ])
+                }
+                onOpen={(item) => void openTask(item)}
+                onRestore={() => setHiddenTaskIds([])}
+                tasks={visibleTasks}
+              />
+            </div>
+
+            <AnimatePresence>
+              {error && (
+                <motion.div
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mt-4 flex items-start gap-3 rounded-2xl border border-red-300/60 bg-red-50/80 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300"
+                  exit={{ opacity: 0, y: -5 }}
+                  initial={{ opacity: 0, y: -5 }}
+                >
+                  <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                  <span className="flex-1">{error}</span>
+                  <button onClick={() => setError(null)} type="button">
+                    ×
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {task && (
+              <motion.div
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-5 space-y-4"
+                initial={{ opacity: 0, y: 12 }}
+              >
+                <div className="grid gap-4">
+                  <section className="soft-panel p-5 sm:p-6">
+                    <div>
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                          <p className="eyebrow">Текущий репозиторий</p>
+                          <h2 className="mt-1.5 max-w-xl break-words font-display text-2xl font-semibold text-ink">
+                            {repositoryName(task.repositoryUrl)}
+                          </h2>
+                          <p className="mt-1 break-all font-mono text-xs text-muted">
+                            {task.repositoryUrl}
+                          </p>
+                        </div>
+                        {task.status === "COMPLETED" && (
+                          <span className="flex items-center gap-1.5 rounded-full bg-success-soft px-3 py-1.5 text-xs font-medium text-success">
+                            <CheckCircle2 className="size-3.5" /> Готово
+                          </span>
+                        )}
+                      </div>
+
+                      {progress && (
+                        <div className="mt-5 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                          {[
+                            ["Всего", progress.totalCommits],
+                            ["Готово", progress.completedCommits],
+                            ["В работе", progress.processingCommits],
+                            ["С ошибкой", progress.failedCommits],
+                          ].map(([label, value]) => (
+                            <div className="rounded-xl border border-line bg-panel-strong p-3" key={label}>
+                              <div className="font-display text-xl font-semibold text-ink">{value}</div>
+                              <div className="mt-0.5 text-[11px] text-muted">{label}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {task.status === "FAILED" && (
+                      <FlowHoverButton
+                        className="mt-6 self-start"
+                        icon={<RotateCcw className="size-4" />}
+                        onClick={() => void retryTask()}
+                        type="button"
+                      >
+                        Повторить анализ
+                      </FlowHoverButton>
+                    )}
+                  </section>
+
+                  <AnalysisTimeline
+                    insightsReady={insightsReady}
+                    progress={progress}
+                    report={report}
+                    task={task}
+                  />
+                </div>
+
+                {graph && clusters && (
+                  <InsightsPanel clusters={clusters} graph={graph} />
+                )}
+
+                <ReportPanel
+                  liveContent={liveContent}
+                  onRetry={retryReport}
+                  report={report}
+                />
+              </motion.div>
+            )}
+
+            {!hasWorkspace && (
+              <div className="mx-auto mt-7 grid max-w-4xl gap-3 sm:grid-cols-3">
+                {[
+                  [BookOpenText, "Технический контекст", "Diff и структура Java-кода до обращения к LLM"],
+                  [GitFork, "Настоящая история", "Родители, ветки и смысловые группы изменений"],
+                  [Sparkles, "Ролевые отчёты", "Пять вариантов отчёта для пяти точек зрения"],
+                ].map(([Icon, title, description]) => {
+                  const FeatureIcon = Icon as typeof BookOpenText;
+                  return (
+                    <div className="tech-card rounded-2xl border border-line/80 bg-panel/45 p-4" key={String(title)}>
+                      <FeatureIcon className="mb-3 size-4 text-accent" />
+                      <p className="text-sm font-semibold text-ink">{String(title)}</p>
+                      <p className="mt-1 text-xs leading-5 text-muted">{String(description)}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="soft-panel mt-5 px-5 pb-5 lg:hidden">
+              <HelpAccordion />
+            </div>
+
+            <div className="diagonal-card mx-auto mt-5 max-w-4xl lg:hidden">
+              <p className="text-sm font-semibold text-ink">dev. Ivan Naumenko</p>
+              <p className="mt-4 text-[10px] uppercase tracking-[0.16em] text-muted">
+                © 2026 Иван Науменко
+              </p>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Произошла непредвиденная ошибка";
+}
