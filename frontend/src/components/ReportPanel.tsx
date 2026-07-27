@@ -1,4 +1,5 @@
 import { Download, FileText, LoaderCircle, RotateCcw } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import ReactMarkdown from "react-markdown";
 import { useEffect, useState } from "react";
 import {
@@ -16,6 +17,7 @@ interface ReportPanelProps {
 }
 
 export function ReportPanel({ report, liveContent, onRetry }: ReportPanelProps) {
+  const reduceMotion = useReducedMotion();
   const [pdfAsset, setPdfAsset] = useState<{
     key: string;
     url: string;
@@ -77,7 +79,15 @@ export function ReportPanel({ report, liveContent, onRetry }: ReportPanelProps) 
   const pdfFileName = `repository-report-${report.analysisTaskId}-${report.audience.toLowerCase()}.pdf`;
 
   return (
-    <section className="soft-panel overflow-hidden">
+    <motion.section
+      animate={{ opacity: 1, y: 0 }}
+      className="soft-panel overflow-hidden"
+      initial={reduceMotion ? false : { opacity: 0, y: 14 }}
+      transition={{
+        duration: reduceMotion ? 0 : 0.45,
+        ease: [0.22, 1, 0.36, 1],
+      }}
+    >
       <header className="flex flex-wrap items-center justify-between gap-4 border-b border-line px-5 py-4 sm:px-7">
         <div className="flex items-center gap-3">
           <span className="flex size-9 items-center justify-center rounded-xl bg-accent-soft text-accent">
@@ -98,7 +108,7 @@ export function ReportPanel({ report, liveContent, onRetry }: ReportPanelProps) 
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {report.status === "PROCESSING" && (
-            <LoaderCircle className="size-5 animate-spin text-accent" />
+            <LoaderCircle className="size-5 animate-spin text-accent motion-reduce:animate-none" />
           )}
           {content && pdfUrl && (
             <FlowHoverLink
@@ -112,7 +122,9 @@ export function ReportPanel({ report, liveContent, onRetry }: ReportPanelProps) 
           {content && !pdfUrl && (
             <FlowHoverButton
               disabled
-              icon={<LoaderCircle className="size-4 animate-spin" />}
+              icon={
+                <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />
+              }
               type="button"
             >
               {preparingPdf
@@ -149,6 +161,6 @@ export function ReportPanel({ report, liveContent, onRetry }: ReportPanelProps) 
           </div>
         )}
       </div>
-    </section>
+    </motion.section>
   );
 }

@@ -90,9 +90,9 @@ export function RepositoryForm({ loading, onSubmit }: RepositoryFormProps) {
           disabled={loading}
           icon={
             loading ? (
-              <LoaderCircle className="size-4 animate-spin" />
+              <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />
             ) : (
-              <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+              <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5 motion-reduce:transform-none motion-reduce:transition-none" />
             )
           }
           type="submit"

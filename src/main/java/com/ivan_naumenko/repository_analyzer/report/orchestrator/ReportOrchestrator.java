@@ -203,22 +203,20 @@ public class ReportOrchestrator {
     }
 
     private CommitReportResult processCommit(ReportGenerationData report, ReportCommitJob job) {
+
         CompactCommitContext context = contextService.load(job.commitId());
+
         String prompt = promptFactory.build(context, report.audience());
-        String response = requestCoordinator.getOrGenerate(
-                prompt,
-                report.audience()
-        );
+
+        String response = requestCoordinator.getOrGenerate(prompt, report.audience());
+
         String commitSection = """
         ## %s — %s
 
         %s
 
-        """.formatted(
-                context.commitHash(),
-                context.message(),
-                response
-        );
+        """.formatted(context.commitHash(), context.message(), response);
+
         return new CommitReportResult(
                 job.position(),
                 job.commitId(),

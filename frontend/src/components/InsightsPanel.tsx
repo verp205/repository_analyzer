@@ -1,4 +1,5 @@
 import { GitCommitHorizontal, GitMerge, Route, Split } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import { CommitGraphTree } from "@/components/CommitGraphTree";
 import type { CommitClusters, CommitGraph } from "@/lib/types";
 
@@ -10,6 +11,7 @@ interface InsightsPanelProps {
 const clusterColors = ["#b98e68", "#7f9882", "#b47d78", "#8b84a4", "#c1a65f"];
 
 export function InsightsPanel({ graph, clusters }: InsightsPanelProps) {
+  const reduceMotion = useReducedMotion();
   const stats = [
     { label: "Коммиты", value: graph.totalCommits, icon: GitCommitHorizontal },
     { label: "Макс. глубина", value: graph.maxDepth, icon: Route },
@@ -23,7 +25,15 @@ export function InsightsPanel({ graph, clusters }: InsightsPanelProps) {
 
   return (
     <section className="grid min-w-0 items-start gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-      <div className="soft-panel min-w-0 p-5 sm:p-6">
+      <motion.div
+        animate={{ opacity: 1, y: 0 }}
+        className="soft-panel min-w-0 p-5 sm:p-6"
+        initial={reduceMotion ? false : { opacity: 0, y: 14 }}
+        transition={{
+          duration: reduceMotion ? 0 : 0.45,
+          ease: [0.22, 1, 0.36, 1],
+        }}
+      >
         <p className="eyebrow">Граф коммитов</p>
         <h2 className="mt-1 font-display text-xl font-semibold text-ink">
           Структура репозитория
@@ -40,9 +50,18 @@ export function InsightsPanel({ graph, clusters }: InsightsPanelProps) {
         <div className="mt-5 min-w-0 rounded-2xl border border-line bg-panel-strong p-4">
           <CommitGraphTree graph={graph} />
         </div>
-      </div>
+      </motion.div>
 
-      <div className="soft-panel p-5 sm:p-6">
+      <motion.div
+        animate={{ opacity: 1, y: 0 }}
+        className="soft-panel p-5 sm:p-6"
+        initial={reduceMotion ? false : { opacity: 0, y: 14 }}
+        transition={{
+          delay: reduceMotion ? 0 : 0.08,
+          duration: reduceMotion ? 0 : 0.45,
+          ease: [0.22, 1, 0.36, 1],
+        }}
+      >
         <p className="eyebrow">Группы изменений</p>
         <h2 className="mt-1 font-display text-xl font-semibold text-ink">
           Над чем велась работа
@@ -61,7 +80,7 @@ export function InsightsPanel({ graph, clusters }: InsightsPanelProps) {
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-accent-soft">
                 <div
-                  className="h-full rounded-full transition-[width] duration-700"
+                  className="progress-fill h-full rounded-full transition-[width] duration-700 motion-reduce:transition-none"
                   style={{
                     backgroundColor: clusterColors[index % clusterColors.length],
                     width: `${Math.max(8, (cluster.commits.length / maxClusterSize) * 100)}%`,
@@ -71,7 +90,7 @@ export function InsightsPanel({ graph, clusters }: InsightsPanelProps) {
             </div>
           ))}
         </div>
-      </div>
+      </motion.div>
     </section>
   );
 }

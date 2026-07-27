@@ -149,6 +149,7 @@ button {
   border-radius: 999px;
   background: radial-gradient(circle, color-mix(in srgb, var(--accent) 10%, transparent), transparent 68%);
   filter: blur(18px);
+  animation: ambient-drift 12s ease-in-out infinite alternate;
 }
 
 .hero-card {
@@ -218,6 +219,7 @@ button {
   opacity: 0.96;
   transform: scale(1.015);
   transform-origin: right center;
+  animation: glass-orb-float 8s ease-in-out infinite;
 }
 
 .terminal-shell {
@@ -345,6 +347,91 @@ button {
   transform: translateY(-2px);
 }
 
+.analysis-step-active {
+  animation: active-step-breathe 1.8s ease-in-out infinite;
+}
+
+.progress-fill {
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 22%,
+    rgb(255 255 255 / 0.42) 48%,
+    transparent 74%
+  );
+  transform: translateX(-130%);
+  animation: progress-sheen 2.1s ease-in-out infinite;
+}
+
+.commit-graph-edge {
+  stroke-dasharray: 8 4;
+  animation: graph-edge-flow 9s linear infinite;
+}
+
+.commit-graph-node {
+  transition: filter 180ms ease;
+}
+
+.commit-graph-node:hover,
+.commit-graph-node:focus {
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 68%, transparent));
+}
+
+@keyframes ambient-drift {
+  from {
+    opacity: 0.72;
+    transform: translate3d(-1.5rem, 0, 0) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(1.5rem, 1rem, 0) scale(1.04);
+  }
+}
+
+@keyframes glass-orb-float {
+  0%,
+  100% {
+    transform: scale(1.015) translate3d(0, 0, 0);
+  }
+  50% {
+    transform: scale(1.035) translate3d(-0.6%, -0.8%, 0);
+  }
+}
+
+@keyframes active-step-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 4px var(--accent-soft);
+  }
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+}
+
+@keyframes progress-sheen {
+  0%,
+  35% {
+    transform: translateX(-130%);
+  }
+  75%,
+  100% {
+    transform: translateX(130%);
+  }
+}
+
+@keyframes graph-edge-flow {
+  to {
+    stroke-dashoffset: -48;
+  }
+}
+
 .report-markdown {
   color: var(--muted);
   font-size: 0.92rem;
@@ -427,12 +514,15 @@ button {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  html:focus-within {
+    scroll-behavior: auto;
+  }
+
   *,
   *::before,
   *::after {
     scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    animation: none !important;
+    transition: none !important;
   }
 }

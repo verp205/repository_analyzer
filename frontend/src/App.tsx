@@ -8,7 +8,7 @@ import {
   Sparkles,
   Sun,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   type MouseEvent as ReactMouseEvent,
   useCallback,
@@ -84,6 +84,7 @@ function initialHiddenTaskIds() {
 }
 
 export default function App() {
+  const reduceMotion = useReducedMotion();
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [themeRipple, setThemeRipple] = useState<ThemeRipple | null>(null);
   const [tasks, setTasks] = useState<AnalysisTask[]>([]);
@@ -359,10 +360,6 @@ export default function App() {
     const nextTheme = theme === "light" ? "dark" : "light";
     const startViewTransition = (document as ViewTransitionDocument)
       .startViewTransition;
-    const reduceMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
-
     if (reduceMotion) {
       setTheme(nextTheme);
       return;
@@ -420,7 +417,7 @@ export default function App() {
 
   return (
     <div className="tech-canvas min-h-screen text-ink">
-      <AnimatePresence>
+      <AnimatePresence initial={!reduceMotion}>
         {themeRipple && (
           <motion.div
             animate={{ opacity: 1, scale: 1 }}
@@ -440,12 +437,25 @@ export default function App() {
               top: themeRipple.y - themeRipple.radius,
               width: themeRipple.radius * 2,
             }}
-            transition={{ duration: 0.68, ease: [0.22, 1, 0.36, 1] }}
+            transition={
+              reduceMotion
+                ? { duration: 0 }
+                : { duration: 0.68, ease: [0.22, 1, 0.36, 1] }
+            }
           />
         )}
       </AnimatePresence>
       <div className="mx-auto grid min-h-screen max-w-[1680px] lg:grid-cols-[310px_minmax(0,1fr)]">
-        <aside className="flex flex-col border-b border-line bg-sidebar px-6 py-6 lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r lg:px-7 lg:py-8">
+        <motion.aside
+          animate={{ opacity: 1, x: 0 }}
+          className="flex flex-col border-b border-line bg-sidebar px-6 py-6 lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r lg:px-7 lg:py-8"
+          initial={reduceMotion ? false : { opacity: 0, x: -24 }}
+          transition={
+            reduceMotion
+              ? { duration: 0 }
+              : { duration: 0.55, ease: [0.22, 1, 0.36, 1] }
+          }
+        >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <span className="relative flex size-10 items-center justify-center rounded-2xl border border-line bg-panel shadow-soft">
@@ -497,16 +507,29 @@ export default function App() {
               © 2026 Иван Науменко
             </p>
           </div>
-        </aside>
+        </motion.aside>
 
-        <main className="relative overflow-hidden px-4 py-5 sm:px-7 sm:py-7 xl:px-12 xl:py-10">
+        <motion.main
+          animate={{ opacity: 1 }}
+          className="relative overflow-hidden px-4 py-5 sm:px-7 sm:py-7 xl:px-12 xl:py-10"
+          initial={reduceMotion ? false : { opacity: 0 }}
+          transition={{ duration: reduceMotion ? 0 : 0.5 }}
+        >
           <div className="ambient-glow" />
           <div className="relative mx-auto max-w-[1180px]">
-            <header className="mb-8 flex items-center justify-between gap-4">
+            <motion.header
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-8 flex items-center justify-between gap-4"
+              initial={reduceMotion ? false : { opacity: 0, y: -10 }}
+              transition={{
+                delay: reduceMotion ? 0 : 0.14,
+                duration: reduceMotion ? 0 : 0.4,
+              }}
+            >
               <div className="flex items-center gap-2 text-xs font-medium text-muted">
                 <span className="relative flex size-2">
                   {connectionStatus === "online" && (
-                    <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-40" />
+                    <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-40 motion-reduce:animate-none" />
                   )}
                   <span
                     className={`relative inline-flex size-2 rounded-full ${
@@ -529,15 +552,30 @@ export default function App() {
                   задача/{task.id} · {task.branch}
                 </span>
               )}
-            </header>
+            </motion.header>
 
-            <section className="hero-card">
+            <motion.section
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              className="hero-card"
+              initial={
+                reduceMotion ? false : { opacity: 0, scale: 0.985, y: 16 }
+              }
+              transition={
+                reduceMotion
+                  ? { duration: 0 }
+                  : {
+                      delay: 0.08,
+                      duration: 0.62,
+                      ease: [0.22, 1, 0.36, 1],
+                    }
+              }
+            >
               <div aria-hidden="true" className="glass-orb" />
               <div className="relative z-10 w-full">
                 <p className="eyebrow mb-4">Новый анализ</p>
                 <RepositoryForm loading={submitting} onSubmit={startAnalysis} />
               </div>
-            </section>
+            </motion.section>
 
             <div className="soft-panel mt-4 px-5 pb-5 lg:hidden">
               <RecentAnalyses
@@ -553,13 +591,14 @@ export default function App() {
               />
             </div>
 
-            <AnimatePresence>
+            <AnimatePresence initial={!reduceMotion}>
               {error && (
                 <motion.div
                   animate={{ opacity: 1, y: 0 }}
                   className="mt-4 flex items-start gap-3 rounded-2xl border border-red-300/60 bg-red-50/80 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300"
                   exit={{ opacity: 0, y: -5 }}
-                  initial={{ opacity: 0, y: -5 }}
+                  initial={reduceMotion ? false : { opacity: 0, y: -5 }}
+                  transition={reduceMotion ? { duration: 0 } : undefined}
                 >
                   <AlertCircle className="mt-0.5 size-4 shrink-0" />
                   <span className="flex-1">{error}</span>
@@ -574,7 +613,8 @@ export default function App() {
               <motion.div
                 animate={{ opacity: 1, y: 0 }}
                 className="mt-5 space-y-4"
-                initial={{ opacity: 0, y: 12 }}
+                initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+                transition={reduceMotion ? { duration: 0 } : undefined}
               >
                 <div className="grid gap-4">
                   <section className="soft-panel p-5 sm:p-6">
@@ -651,14 +691,24 @@ export default function App() {
                   [BookOpenText, "Технический контекст", "Diff и структура Java-кода до обращения к LLM"],
                   [GitFork, "Настоящая история", "Родители, ветки и смысловые группы изменений"],
                   [Sparkles, "Ролевые отчёты", "Пять вариантов отчёта для пяти точек зрения"],
-                ].map(([Icon, title, description]) => {
+                ].map(([Icon, title, description], index) => {
                   const FeatureIcon = Icon as typeof BookOpenText;
                   return (
-                    <div className="tech-card rounded-2xl border border-line/80 bg-panel/45 p-4" key={String(title)}>
+                    <motion.div
+                      animate={{ opacity: 1, y: 0 }}
+                      className="tech-card rounded-2xl border border-line/80 bg-panel/45 p-4"
+                      initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+                      key={String(title)}
+                      transition={{
+                        delay: reduceMotion ? 0 : 0.2 + index * 0.07,
+                        duration: reduceMotion ? 0 : 0.4,
+                        ease: [0.22, 1, 0.36, 1],
+                      }}
+                    >
                       <FeatureIcon className="mb-3 size-4 text-accent" />
                       <p className="text-sm font-semibold text-ink">{String(title)}</p>
                       <p className="mt-1 text-xs leading-5 text-muted">{String(description)}</p>
-                    </div>
+                    </motion.div>
                   );
                 })}
               </div>
@@ -675,7 +725,7 @@ export default function App() {
               </p>
             </div>
           </div>
-        </main>
+        </motion.main>
       </div>
     </div>
   );

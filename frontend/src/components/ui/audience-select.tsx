@@ -1,5 +1,5 @@
 import { Check, ChevronDown, Users } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import type { ReportAudience } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -23,6 +23,7 @@ export function AudienceSelect({
   onChange,
   value,
 }: AudienceSelectProps) {
+  const reduceMotion = useReducedMotion();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const selected = audiences.find((item) => item.value === value) ?? audiences[0];
@@ -67,16 +68,22 @@ export function AudienceSelect({
         />
       </button>
 
-      <AnimatePresence>
+      <AnimatePresence initial={!reduceMotion}>
         {open && (
           <motion.div
             animate={{ opacity: 1, y: 0, scale: 1 }}
             aria-label="Для кого создать отчёт"
             className="absolute bottom-[calc(100%+0.55rem)] left-0 z-50 w-full min-w-[min(18rem,calc(100vw-3rem))] overflow-hidden rounded-2xl border border-zinc-700 bg-[#151719]/95 p-2 font-mono text-xs text-zinc-300 shadow-[0_24px_55px_rgba(0,0,0,0.55)] backdrop-blur-xl"
             exit={{ opacity: 0, y: 7, scale: 0.97 }}
-            initial={{ opacity: 0, y: 7, scale: 0.97 }}
+            initial={
+              reduceMotion ? false : { opacity: 0, y: 7, scale: 0.97 }
+            }
             role="listbox"
-            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+            transition={
+              reduceMotion
+                ? { duration: 0 }
+                : { duration: 0.18, ease: [0.22, 1, 0.36, 1] }
+            }
           >
             {audiences.map((item) => {
               const isSelected = item.value === value;
@@ -101,7 +108,10 @@ export function AudienceSelect({
                   {isSelected && (
                     <motion.span
                       animate={{ opacity: 1, scale: 1 }}
-                      initial={{ opacity: 0, scale: 0.7 }}
+                      initial={
+                        reduceMotion ? false : { opacity: 0, scale: 0.7 }
+                      }
+                      transition={reduceMotion ? { duration: 0 } : undefined}
                     >
                       <Check className="size-4" />
                     </motion.span>
