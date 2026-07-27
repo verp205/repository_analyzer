@@ -10,6 +10,8 @@ import com.ivan_naumenko.repository_analyzer.insight.cluster.dto.CommitClustersR
 import com.ivan_naumenko.repository_analyzer.insight.cluster.service.CommitClusteringService;
 import com.ivan_naumenko.repository_analyzer.insight.graph.dto.CommitGraphResponse;
 import com.ivan_naumenko.repository_analyzer.insight.graph.service.CommitGraphService;
+import com.ivan_naumenko.repository_analyzer.report.model.CommitReportResult;
+import com.ivan_naumenko.repository_analyzer.report.model.ReportCommitJob;
 import com.ivan_naumenko.repository_analyzer.report.model.ReportGenerationData;
 import com.ivan_naumenko.repository_analyzer.report.service.AnalysisReportService;
 import com.ivan_naumenko.repository_analyzer.report.sse.ReportEvent;
@@ -20,6 +22,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
@@ -81,13 +84,22 @@ public class ReportOrchestrator {
 
     private void generate(Integer reportId) {
         try {
+
             ReportGenerationData report = reportService.getGenerationData(
                     reportId
             );
+
             List<Integer> commitIds = commitRepository.findIdsForReport(
                     report.taskId(),
                     CommitProcessingStatus.COMPLETED
             );
+
+            List<ReportCommitJob> commitsWithPosition = new ArrayList<>();
+
+            for (int position = 0; position < commitIds.size(); position++) {
+                commitsWithPosition.add(new ReportCommitJob(position, commitIds.get(position)));
+            }
+
             reportService.initializeProgress(reportId, commitIds.size());
             CommitGraphResponse graph = graphService.build(report.taskId());
             CommitClustersResponse clusters = clusteringService.cluster(
@@ -142,42 +154,26 @@ public class ReportOrchestrator {
                     content.toString()
             );
 
-            for (int position = 0; position < commitIds.size(); position++) {
-                Integer commitId = commitIds.get(position);
-                CompactCommitContext context = contextService.load(commitId);
-                String prompt = promptFactory.build(
-                        context,
-                        report.audience()
-                );
-                String response = requestCoordinator.getOrGenerate(
-                        prompt,
-                        report.audience()
-                );
+            for (ReportCommitJob job : commitsWithPosition) {
+                CommitReportResult result = processCommit(report, job);
 
-                String commitSection = new StringBuilder()
-                        .append("## ")
-                        .append(context.commitHash())
-                        .append(" — ")
-                        .append(context.message())
-                        .append("\n\n")
-                        .append(response)
-                        .append("\n\n")
-                        .toString();
-                content.append(commitSection);
+                content.append(result.content());
 
-                int processed = position + 1;
+                int processed = result.position() + 1;
+
                 reportService.updateProgress(
                         reportId,
                         processed,
                         content.toString()
                 );
+
                 publish(
                         "PROGRESS",
                         reportId,
                         processed,
                         commitIds.size(),
-                        "Обработан коммит " + context.commitHash(),
-                        commitSection
+                        "Обработан коммит с ID " + result.commitId(),
+                        result.content()
                 );
             }
 
@@ -204,6 +200,30 @@ public class ReportOrchestrator {
             eventService.complete(reportId);
             log.error("Формирование отчёта {} завершилось ошибкой", reportId, exception);
         }
+    }
+
+    private CommitReportResult processCommit(ReportGenerationData report, ReportCommitJob job) {
+        CompactCommitContext context = contextService.load(job.commitId());
+        String prompt = promptFactory.build(context, report.audience());
+        String response = requestCoordinator.getOrGenerate(
+                prompt,
+                report.audience()
+        );
+        String commitSection = """
+        ## %s — %s
+
+        %s
+
+        """.formatted(
+                context.commitHash(),
+                context.message(),
+                response
+        );
+        return new CommitReportResult(
+                job.position(),
+                job.commitId(),
+                commitSection
+        );
     }
 
     private void publish(
