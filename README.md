@@ -1,71 +1,112 @@
 # Repository Analyzer
 
-Анализатор истории Java-репозиториев с формированием отчёта через LLM.
+Многопоточный анализатор истории Java-репозиториев. Он восстанавливает граф коммитов, исследует diff и структуру Java-кода, группирует изменения и формирует цельный LLM-отчёт для выбранной роли: разработчика, аналитика, специалиста по безопасности, тимлида или руководителя.
 
-## Как запустить
+![Главная страница Repository Analyzer](docs/images/main-page.png)
 
-Понадобятся JDK 21, Node.js и npm.
+## Что происходит во время анализа
 
-1. Запустите backend из корня проекта:
+1. JGit клонирует репозиторий или обновляет его локальную копию.
+2. История коммитов сохраняется в SQLite вместе с parent-связями.
+3. До 10 worker-потоков в случайном порядке извлекают diff и изменённые файлы.
+4. JavaParser выделяет пакеты, классы, методы и признаки ошибок разбора.
+5. Из технических данных собирается компактный контекст для LLM.
+6. Ответы кэшируются по хэшу prompt, поэтому одинаковые запросы не отправляются повторно.
+7. Частичные результаты поступают во frontend через SSE, а после обработки собираются в общий ролевой отчёт, который можно скачать в PDF.
 
-   ```bash
-   ./mvnw spring-boot:run
-   ```
+Анализ идемпотентен: завершённая работа не дублируется, после перезапуска её можно продолжить, а выполнение анализа и формирование отчёта можно остановить.
 
-2. В новом окне терминала запустите frontend:
+## Интерфейс
 
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
+### Сводка анализа
 
-3. Откройте <http://localhost:5173>, вставьте ссылку на Git-репозиторий, укажите ветку, выберите вид отчёта и нажмите «Начать анализ».
+Статус репозитория, прогресс обработки и выбор отдельного отчёта для каждой роли.
 
-По умолчанию используется локальная Ollama с моделью `qwen3:8b`. Перед backend
-запустите `ollama serve`; API-ключ для локальной модели не нужен.
+![Сводка анализа репозитория](docs/images/analysis-overview.png)
 
-Для приватного репозитория используйте его HTTPS-ссылку. В форме раскройте
-«Доступ к приватному репозиторию» и укажите personal access token с правом
-чтения репозитория. Имя пользователя обычно можно оставить пустым. Git-токен
-используется только для clone/fetch и не сохраняется в SQLite.
+### Граф и группы изменений
 
-## Как поменять модель
+Точная история parent/merge-связей и смысловая группировка выполненной работы.
 
-Настройки находятся в `src/main/resources/application.properties`.
+![Граф коммитов и группы изменений](docs/images/commit-graph-and-clusters.png)
 
-Для OpenAI или другого OpenAI-compatible сервера укажите:
+### Итоговый отчёт
 
-```properties
-repository-analyzer.llm.provider=openai-compatible
-repository-analyzer.llm.provider-id=openai
-repository-analyzer.llm.base-url=https://api.openai.com
-repository-analyzer.llm.chat-path=/v1/chat/completions
-repository-analyzer.llm.model=название-модели
-repository-analyzer.llm.api-key=${LLM_API_KEY:}
-repository-analyzer.llm.max-concurrent-requests=2
-repository-analyzer.llm.commit-max-tokens=700
-repository-analyzer.llm.commit-reasoning-effort=none
-repository-analyzer.llm.synthesis-batch-max-tokens=600
-repository-analyzer.llm.synthesis-batch-reasoning-effort=none
-repository-analyzer.llm.synthesis-final-max-tokens=1800
-repository-analyzer.llm.synthesis-final-reasoning-effort=low
-```
+Общая картина проекта, направления развития, архитектурная эволюция, сильные стороны, риски и рекомендации для выбранной роли.
 
-Чтобы выбрать другую модель, поменяйте значение:
+![Итоговый ролевой отчёт](docs/images/final-report.png)
 
-```properties
-repository-analyzer.llm.model=название-модели
-```
+## Быстрый запуск
 
-API-ключ не сохраняйте в проекте. Перед запуском передайте его через переменную окружения:
+Понадобятся:
+
+- JDK 21;
+- Node.js и npm;
+- Ollama с моделью `qwen3:8b` либо доступ к другому OpenAI-compatible API.
+
+По умолчанию проект использует локальную Ollama. Подготовьте модель:
 
 ```bash
-export LLM_API_KEY=ваш-api-ключ
+ollama pull qwen3:8b
+ollama serve
+```
+
+Запустите backend из корня проекта:
+
+```bash
 ./mvnw spring-boot:run
 ```
 
-Если выбранный OpenAI-compatible сервер не поддерживает `reasoning_effort`,
-оставьте соответствующие значения после `=` пустыми.
+В другом окне терминала запустите frontend:
 
-После изменения настроек перезапустите backend.
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Откройте [http://localhost:5173](http://localhost:5173), вставьте HTTPS-ссылку на Git-репозиторий, укажите ветку, выберите роль и нажмите **«Начать анализ»**.
+
+Для приватного репозитория раскройте в форме блок доступа и передайте personal access token с правом чтения. Токен используется только для `clone/fetch` и не сохраняется в SQLite.
+
+## Порты и адреса
+
+| Компонент | Адрес | Назначение |
+|---|---|---|
+| Frontend | [localhost:5173](http://localhost:5173) | Пользовательский интерфейс |
+| Backend API | [localhost:8080](http://localhost:8080) | REST API и SSE |
+| Swagger UI | [localhost:8080/swagger-ui/index.html](http://localhost:8080/swagger-ui/index.html) | Документация API |
+| Health check | [localhost:8080/actuator/health](http://localhost:8080/actuator/health) | Состояние backend |
+| Ollama | `localhost:11434` | Локальный LLM API |
+
+SQLite не использует отдельный порт. База создаётся автоматически в `data/repository-analyzer.db`, а локальные копии репозиториев — в `data/repositories`.
+
+## Подключение другой LLM
+
+Настройки находятся в [`src/main/resources/application.properties`](src/main/resources/application.properties). Любой OpenAI-compatible сервер подключается заменой параметров:
+
+```properties
+repository-analyzer.llm.provider=openai-compatible
+repository-analyzer.llm.provider-id=my-provider
+repository-analyzer.llm.base-url=https://api.example.com
+repository-analyzer.llm.chat-path=/v1/chat/completions
+repository-analyzer.llm.model=my-model
+repository-analyzer.llm.api-key=${LLM_API_KEY:}
+```
+
+Перед запуском передайте ключ через окружение и перезапустите backend:
+
+```bash
+export LLM_API_KEY=your-api-key
+./mvnw spring-boot:run
+```
+
+Для локальной Ollama ключ не нужен. Лимиты параллельных запросов, объём контекста и длина ответов также настраиваются в `application.properties`.
+
+## Основной стек
+
+Java 21, Spring Boot, JPA/Hibernate, SQLite, Flyway, JGit, JGraphT, JavaParser, SSE, React, TypeScript, Vite и Tailwind CSS.
+
+---
+
+**dev. Ivan Naumenko · 2026**
