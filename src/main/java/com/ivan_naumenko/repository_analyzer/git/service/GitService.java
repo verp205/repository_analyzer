@@ -6,8 +6,11 @@ import com.ivan_naumenko.repository_analyzer.git.exception.RepositoryNotFoundExc
 import com.ivan_naumenko.repository_analyzer.git.exception.RepositoryReadException;
 import com.ivan_naumenko.repository_analyzer.git.exception.RepositorySyncException;
 import com.ivan_naumenko.repository_analyzer.git.model.GitCommit;
+import com.ivan_naumenko.repository_analyzer.git.model.GitCredentials;
 import lombok.RequiredArgsConstructor;
+import org.eclipse.jgit.api.CloneCommand;
 import org.eclipse.jgit.api.CreateBranchCommand;
+import org.eclipse.jgit.api.FetchCommand;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
@@ -19,12 +22,16 @@ import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.treewalk.TreeWalk;
+import org.eclipse.jgit.transport.CredentialsProvider;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.FileVisitResult;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
@@ -70,9 +77,20 @@ public class GitService {
             String repositoryUrl,
             String branch
     ) throws RepositorySyncException {
+        return cloneOrUpdateRepository(repositoryUrl, branch, null);
+    }
+
+    public Path cloneOrUpdateRepository(
+            String repositoryUrl,
+            String branch,
+            GitCredentials credentials
+    ) throws RepositorySyncException {
         validateArguments(repositoryUrl, branch);
         String normalizedRepositoryUrl = repositoryUrl.trim();
         String normalizedBranch = branch.trim();
+        CredentialsProvider credentialsProvider = credentials == null
+                ? null
+                : credentials.createProvider();
         String repositoryKey = repositoryKey(
                 normalizedRepositoryUrl,
                 normalizedBranch
@@ -90,12 +108,18 @@ public class GitService {
             );
 
             if (Files.isDirectory(repositoryDirectory.resolve(".git"))) {
-                updateRepository(repositoryDirectory, normalizedBranch);
+                updateRepository(
+                        repositoryDirectory,
+                        normalizedBranch,
+                        credentialsProvider
+                );
             } else {
+                removeIncompleteClone(repositoryDirectory);
                 cloneRepository(
                         normalizedRepositoryUrl,
                         normalizedBranch,
-                        repositoryDirectory
+                        repositoryDirectory,
+                        credentialsProvider
                 );
             }
 
@@ -112,6 +136,39 @@ public class GitService {
         } finally {
             repositoryLock.unlock();
         }
+    }
+
+    private void removeIncompleteClone(Path repositoryDirectory)
+            throws IOException {
+        if (!Files.exists(repositoryDirectory)) {
+            return;
+        }
+
+        Files.walkFileTree(
+                repositoryDirectory,
+                new SimpleFileVisitor<>() {
+                    @Override
+                    public FileVisitResult visitFile(
+                            Path file,
+                            BasicFileAttributes attributes
+                    ) throws IOException {
+                        Files.delete(file);
+                        return FileVisitResult.CONTINUE;
+                    }
+
+                    @Override
+                    public FileVisitResult postVisitDirectory(
+                            Path directory,
+                            IOException exception
+                    ) throws IOException {
+                        if (exception != null) {
+                            throw exception;
+                        }
+                        Files.delete(directory);
+                        return FileVisitResult.CONTINUE;
+                    }
+                }
+        );
     }
 
     public List<GitCommit> readHistory(
@@ -186,12 +243,18 @@ public class GitService {
 
     private void updateRepository(
             Path repositoryDirectory,
-            String branch
+            String branch,
+            CredentialsProvider credentialsProvider
     ) throws IOException, GitAPIException {
         try (Git git = Git.open(repositoryDirectory.toFile())) {
-            git.fetch()
-                    .setRemote(REMOTE_NAME)
-                    .call();
+            FetchCommand fetchCommand = git.fetch()
+                    .setRemote(REMOTE_NAME);
+
+            if (credentialsProvider != null) {
+                fetchCommand.setCredentialsProvider(credentialsProvider);
+            }
+
+            fetchCommand.call();
 
             String remoteBranchName =
                     "refs/remotes/" + REMOTE_NAME + "/" + branch;
@@ -295,13 +358,19 @@ public class GitService {
     private void cloneRepository(
             String repositoryUrl,
             String branch,
-            Path repositoryDirectory
+            Path repositoryDirectory,
+            CredentialsProvider credentialsProvider
     ) throws GitAPIException {
-        try (Git ignored = Git.cloneRepository()
+        CloneCommand cloneCommand = Git.cloneRepository()
                 .setURI(repositoryUrl)
                 .setDirectory(repositoryDirectory.toFile())
-                .setBranch(branch)
-                .call()) {
+                .setBranch(branch);
+
+        if (credentialsProvider != null) {
+            cloneCommand.setCredentialsProvider(credentialsProvider);
+        }
+
+        try (Git ignored = cloneCommand.call()) {
         }
     }
 

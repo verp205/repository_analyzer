@@ -76,10 +76,13 @@ public interface RepositoryCommitRepository extends JpaRepository<RepositoryComm
     );
 
     @Query(value = """
-                SELECT id
-                FROM repository_commit
-                WHERE analysis_task_id = :taskId
-                  AND processing_status = 'NEW'
+                SELECT commit_row.id
+                FROM repository_commit commit_row
+                JOIN analysis_task task
+                  ON task.id = commit_row.analysis_task_id
+                WHERE commit_row.analysis_task_id = :taskId
+                  AND commit_row.processing_status = 'NEW'
+                  AND task.status = 'PROCESSING'
                 ORDER BY RANDOM()
                 LIMIT 1
                 """,

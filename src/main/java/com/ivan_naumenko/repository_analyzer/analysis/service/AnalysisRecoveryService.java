@@ -8,6 +8,7 @@ import com.ivan_naumenko.repository_analyzer.analysis.orchestrator.AnalysisOrche
 import com.ivan_naumenko.repository_analyzer.analysis.repository.AnalysisTaskRepository;
 import com.ivan_naumenko.repository_analyzer.commit.model.CommitProcessingStatus;
 import com.ivan_naumenko.repository_analyzer.commit.repository.RepositoryCommitRepository;
+import com.ivan_naumenko.repository_analyzer.git.model.GitCredentials;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -93,7 +94,14 @@ public class AnalysisRecoveryService {
     }
 
     public boolean retryFailedTask(Integer taskId) {
+        return retryFailedTask(taskId, null);
+    }
 
+    public boolean retryFailedTask(
+            Integer taskId,
+            GitCredentials credentials
+    ) {
+        boolean credentialsHandedToOrchestrator = false;
         try {
             repositoryCommitRepository.requeueRetryableFailedCommits(taskId,
                     CommitProcessingStatus.FAILED,
@@ -112,9 +120,73 @@ public class AnalysisRecoveryService {
                 return false;
             }
 
-            return analysisOrchestrator.start(taskId);
+            credentialsHandedToOrchestrator = true;
+            return credentials == null
+                    ? analysisOrchestrator.start(taskId)
+                    : analysisOrchestrator.start(taskId, credentials);
         } catch (Exception exception) {
             throw new AnalysisRecoveryException(taskId, exception);
+        } finally {
+            if (!credentialsHandedToOrchestrator && credentials != null) {
+                credentials.close();
+            }
+        }
+    }
+
+    public boolean retryCancelledTask(Integer taskId) {
+        return retryCancelledTask(taskId, null);
+    }
+
+    public boolean retryCancelledTask(
+            Integer taskId,
+            GitCredentials credentials
+    ) {
+        boolean credentialsHandedToOrchestrator = false;
+
+        try {
+            if (analysisOrchestrator.isPreparationRunning(taskId)) {
+                return false;
+            }
+
+            long processingCommits = repositoryCommitRepository
+                    .countByAnalysisTask_IdAndProcessingStatusIn(
+                            taskId,
+                            List.of(CommitProcessingStatus.PROCESSING)
+                    );
+
+            if (processingCommits != 0) {
+                return false;
+            }
+
+            repositoryCommitRepository.requeueRetryableFailedCommits(
+                    taskId,
+                    CommitProcessingStatus.FAILED,
+                    CommitProcessingStatus.NEW,
+                    LocalDateTime.now(),
+                    properties.maxAttempts(),
+                    AnalysisTaskStatus.CANCELLED
+            );
+
+            boolean reset = analysisTaskService.updateStatusIfCurrent(
+                    taskId,
+                    AnalysisTaskStatus.CANCELLED,
+                    AnalysisTaskStatus.NEW
+            );
+
+            if (!reset) {
+                return false;
+            }
+
+            credentialsHandedToOrchestrator = true;
+            return credentials == null
+                    ? analysisOrchestrator.start(taskId)
+                    : analysisOrchestrator.start(taskId, credentials);
+        } catch (Exception exception) {
+            throw new AnalysisRecoveryException(taskId, exception);
+        } finally {
+            if (!credentialsHandedToOrchestrator && credentials != null) {
+                credentials.close();
+            }
         }
     }
 }

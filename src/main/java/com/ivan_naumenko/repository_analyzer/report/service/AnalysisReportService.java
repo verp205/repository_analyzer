@@ -27,6 +27,10 @@ import java.util.List;
 public class AnalysisReportService {
 
     private static final int MAX_ERROR_LENGTH = 2_000;
+    private static final List<ReportStatus> RETRYABLE_STATUSES = List.of(
+            ReportStatus.FAILED,
+            ReportStatus.CANCELLED
+    );
 
     private final AnalysisReportRepository repository;
     private final AnalysisTaskService taskService;
@@ -87,11 +91,28 @@ public class AnalysisReportService {
         );
     }
 
-    public boolean resetFailed(Integer reportId) {
+    public boolean resetForRetry(Integer reportId) {
+        return writeCoordinator.execute(() -> repository.resetForRetry(
+                reportId,
+                RETRYABLE_STATUSES,
+                ReportStatus.NEW,
+                LocalDateTime.now()
+        ) == 1);
+    }
+
+    public boolean cancel(Integer reportId) {
         return updateStatus(
                 reportId,
-                ReportStatus.FAILED,
-                ReportStatus.NEW
+                ReportStatus.PROCESSING,
+                ReportStatus.CANCELLED
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public boolean isCancelled(Integer reportId) {
+        return repository.existsByIdAndStatus(
+                reportId,
+                ReportStatus.CANCELLED
         );
     }
 

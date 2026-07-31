@@ -1,6 +1,8 @@
 package com.ivan_naumenko.repository_analyzer.llm.client;
 
 import com.ivan_naumenko.repository_analyzer.llm.client.config.LlmProperties;
+import com.ivan_naumenko.repository_analyzer.llm.client.model.LlmRequestOptions;
+import com.ivan_naumenko.repository_analyzer.llm.client.model.LlmRequestProfile;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -11,6 +13,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -64,6 +67,42 @@ class LlmClientConcurrencyTest {
         assertEquals(2, maximumActive.get());
     }
 
+    @Test
+    void appliesDifferentGenerationProfilesAndSeparatesTheirCache() {
+        AtomicReference<LlmRequestOptions> captured = new AtomicReference<>();
+        LlmTransport transport = new LlmTransport() {
+            @Override
+            public String cacheNamespace() {
+                return "test-provider:test-model";
+            }
+
+            @Override
+            public String generate(String prompt) {
+                return "fallback";
+            }
+
+            @Override
+            public String generate(
+                    String prompt,
+                    LlmRequestOptions options
+            ) {
+                captured.set(options);
+                return "response";
+            }
+        };
+        LlmClient client = new LlmClient(transport, properties(2));
+
+        assertEquals(
+                "response",
+                client.generate("prompt", LlmRequestProfile.SYNTHESIS_FINAL)
+        );
+        assertEquals(new LlmRequestOptions(1_800, "low"), captured.get());
+        assertTrue(client.cacheNamespace(LlmRequestProfile.COMMIT_ANALYSIS)
+                .contains("maxTokens=700;reasoning=none"));
+        assertTrue(client.cacheNamespace(LlmRequestProfile.SYNTHESIS_FINAL)
+                .contains("maxTokens=1800;reasoning=low"));
+    }
+
     private LlmProperties properties(int maxConcurrentRequests) {
         return new LlmProperties(
                 "stub",
@@ -72,7 +111,13 @@ class LlmClientConcurrencyTest {
                 "/v1/chat/completions",
                 "test-model",
                 "",
-                maxConcurrentRequests
+                maxConcurrentRequests,
+                700,
+                "none",
+                600,
+                "none",
+                1_800,
+                "low"
         );
     }
 

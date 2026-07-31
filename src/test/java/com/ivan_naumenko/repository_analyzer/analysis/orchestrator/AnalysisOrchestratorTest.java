@@ -7,6 +7,7 @@ import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskServic
 import com.ivan_naumenko.repository_analyzer.commit.service.CommitDiscoveryService;
 import com.ivan_naumenko.repository_analyzer.commit.worker.CommitWorkerFactory;
 import com.ivan_naumenko.repository_analyzer.git.service.GitService;
+import com.ivan_naumenko.repository_analyzer.git.model.GitCredentials;
 import com.ivan_naumenko.repository_analyzer.persistence.SqliteWriteCoordinator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -110,6 +111,7 @@ class AnalysisOrchestratorTest {
                 AnalysisTaskStatus.PROCESSING
         );
         verify(commitWorkerFactory, times(2)).create(TASK_ID);
+        assertFalse(orchestrator.isPreparationRunning(TASK_ID));
     }
 
     @Test
@@ -125,6 +127,64 @@ class AnalysisOrchestratorTest {
         assertFalse(started);
         verifyNoInteractions(analysisExecutor, gitService);
         verify(analysisTaskService, never()).getById(any());
+    }
+
+    @Test
+    void passesCredentialsToGitAndClearsThemAfterClonePipeline() {
+        AnalysisTask task = task();
+        GitCredentials credentials = GitCredentials.from(
+                "ivan",
+                "private-token"
+        );
+        when(analysisTaskService.updateStatusIfCurrent(
+                TASK_ID,
+                AnalysisTaskStatus.NEW,
+                AnalysisTaskStatus.CLONING
+        )).thenReturn(true);
+        when(analysisTaskService.getById(TASK_ID)).thenReturn(task);
+        when(gitService.cloneOrUpdateRepository(
+                REPOSITORY_URL,
+                BRANCH,
+                credentials
+        )).thenReturn(Path.of("repository"));
+        when(analysisTaskService.updateStatusIfCurrent(
+                TASK_ID,
+                AnalysisTaskStatus.CLONING,
+                AnalysisTaskStatus.DISCOVERING_COMMITS
+        )).thenReturn(false);
+        runSubmittedTaskImmediately();
+
+        assertTrue(orchestrator.start(TASK_ID, credentials));
+
+        verify(gitService).cloneOrUpdateRepository(
+                REPOSITORY_URL,
+                BRANCH,
+                credentials
+        );
+        assertThrows(
+                IllegalStateException.class,
+                credentials::createProvider
+        );
+    }
+
+    @Test
+    void clearsCredentialsWhenTaskWasAlreadyClaimed() {
+        GitCredentials credentials = GitCredentials.from(
+                "ivan",
+                "private-token"
+        );
+        when(analysisTaskService.updateStatusIfCurrent(
+                TASK_ID,
+                AnalysisTaskStatus.NEW,
+                AnalysisTaskStatus.CLONING
+        )).thenReturn(false);
+
+        assertFalse(orchestrator.start(TASK_ID, credentials));
+        assertThrows(
+                IllegalStateException.class,
+                credentials::createProvider
+        );
+        verifyNoInteractions(analysisExecutor, gitService);
     }
 
     @Test

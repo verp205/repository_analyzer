@@ -6,5 +6,6 @@ public enum AnalysisTaskStatus {
     DISCOVERING_COMMITS,
     PROCESSING,
     COMPLETED,
-    FAILED
+    FAILED,
+    CANCELLED
 }

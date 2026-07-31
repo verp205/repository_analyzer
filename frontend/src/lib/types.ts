@@ -4,7 +4,8 @@ export type AnalysisTaskStatus =
   | "DISCOVERING_COMMITS"
   | "PROCESSING"
   | "COMPLETED"
-  | "FAILED";
+  | "FAILED"
+  | "CANCELLED";
 
 export type ReportAudience =
   | "DEVELOPER"
@@ -13,7 +14,12 @@ export type ReportAudience =
   | "TEAM_LEAD"
   | "DIRECTOR";
 
-export type ReportStatus = "NEW" | "PROCESSING" | "COMPLETED" | "FAILED";
+export type ReportStatus =
+  | "NEW"
+  | "PROCESSING"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELLED";
 
 export interface AnalysisTask {
   id: number;

@@ -22,6 +22,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
 class AnalysisRecoveryRepositoryIntegrationTest {
@@ -163,6 +164,35 @@ class AnalysisRecoveryRepositoryIntegrationTest {
 
         assertEquals(0, updated);
         assertStatus(failedCommit.getId(), CommitProcessingStatus.FAILED);
+    }
+
+    @Test
+    void cancelledTaskDoesNotExposeNewCommitsToWorkers() {
+        AnalysisTask task = createTask(
+                "https://example.com/cancelled.git",
+                AnalysisTaskStatus.PROCESSING
+        );
+        RepositoryCommit pending = saveCommit(
+                task,
+                "9".repeat(40),
+                CommitProcessingStatus.NEW,
+                0
+        );
+
+        assertEquals(
+                pending.getId(),
+                commitRepository.findRandomNewCommitId(task.getId())
+                        .orElseThrow()
+        );
+
+        assertTrue(analysisTaskService.cancel(task.getId()));
+        assertTrue(
+                commitRepository.findRandomNewCommitId(task.getId()).isEmpty()
+        );
+        assertEquals(
+                AnalysisTaskStatus.CANCELLED,
+                analysisTaskService.getById(task.getId()).getStatus()
+        );
     }
 
     private AnalysisTask createTask(

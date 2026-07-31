@@ -1,5 +1,6 @@
 package com.ivan_naumenko.repository_analyzer.javaanalysis.repository;
 
+import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.analysis.repository.AnalysisTaskRepository;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskService;
 import com.ivan_naumenko.repository_analyzer.commit.repository.CommitParentRepository;
@@ -174,6 +175,7 @@ class JavaAnalysisPersistenceIntegrationTest {
                         "Add Sample"
                 ))
         );
+        moveToProcessing(task.getId());
 
         Integer commitId = claimService.claimRandomCommit(task.getId())
                 .orElseThrow();
@@ -199,6 +201,24 @@ class JavaAnalysisPersistenceIntegrationTest {
                 List.of(new ChangedJavaFileAnalysis(0, analysis))
         );
         return commitId;
+    }
+
+    private void moveToProcessing(Integer taskId) {
+        assertTrue(analysisTaskService.updateStatusIfCurrent(
+                taskId,
+                AnalysisTaskStatus.NEW,
+                AnalysisTaskStatus.CLONING
+        ));
+        assertTrue(analysisTaskService.updateStatusIfCurrent(
+                taskId,
+                AnalysisTaskStatus.CLONING,
+                AnalysisTaskStatus.DISCOVERING_COMMITS
+        ));
+        assertTrue(analysisTaskService.updateStatusIfCurrent(
+                taskId,
+                AnalysisTaskStatus.DISCOVERING_COMMITS,
+                AnalysisTaskStatus.PROCESSING
+        ));
     }
 
     private static Path createTestDatabasePath() {

@@ -2,6 +2,8 @@ package com.ivan_naumenko.repository_analyzer.llm.client;
 
 import com.ivan_naumenko.repository_analyzer.llm.client.config.LlmProperties;
 import com.ivan_naumenko.repository_analyzer.llm.client.exception.LlmRequestException;
+import com.ivan_naumenko.repository_analyzer.llm.client.model.LlmRequestOptions;
+import com.ivan_naumenko.repository_analyzer.llm.client.model.LlmRequestProfile;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
@@ -9,6 +11,8 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @Component
 @ConditionalOnProperty(
@@ -41,11 +45,23 @@ public class OpenAiCompatibleLlmTransport implements LlmTransport {
 
     @Override
     public String generate(String prompt) {
-        ChatCompletionRequest request = new ChatCompletionRequest(
-                properties.model(),
-                List.of(new ChatMessage("user", prompt)),
-                0.0
+        return generate(
+                prompt,
+                properties.optionsFor(LlmRequestProfile.COMMIT_ANALYSIS)
         );
+    }
+
+    @Override
+    public String generate(String prompt, LlmRequestOptions options) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("model", properties.model());
+        request.put("messages", List.of(new ChatMessage("user", prompt)));
+        request.put("temperature", 0.0);
+        request.put("stream", false);
+        request.put("max_tokens", options.maxTokens());
+        if (options.reasoningEffort() != null) {
+            request.put("reasoning_effort", options.reasoningEffort());
+        }
 
         try {
             ChatCompletionResponse response = restClient.post()
@@ -84,13 +100,6 @@ public class OpenAiCompatibleLlmTransport implements LlmTransport {
                 && !properties.apiKey().isBlank()) {
             headers.setBearerAuth(properties.apiKey());
         }
-    }
-
-    private record ChatCompletionRequest(
-            String model,
-            List<ChatMessage> messages,
-            double temperature
-    ) {
     }
 
     private record ChatMessage(

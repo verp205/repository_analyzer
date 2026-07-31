@@ -7,6 +7,7 @@ import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskServic
 import com.ivan_naumenko.repository_analyzer.commit.service.CommitDiscoveryService;
 import com.ivan_naumenko.repository_analyzer.commit.worker.CommitWorkerFactory;
 import com.ivan_naumenko.repository_analyzer.git.model.GitCommit;
+import com.ivan_naumenko.repository_analyzer.git.model.GitCredentials;
 import com.ivan_naumenko.repository_analyzer.git.service.GitService;
 import com.ivan_naumenko.repository_analyzer.persistence.SqliteWriteCoordinator;
 import org.slf4j.Logger;
@@ -16,8 +17,10 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Component
 public class AnalysisOrchestrator {
@@ -33,6 +36,8 @@ public class AnalysisOrchestrator {
     private final AnalysisProperties analysisProperties;
     private final SqliteWriteCoordinator writeCoordinator;
     private final ExecutorService analysisExecutor;
+    private final ConcurrentHashMap<Integer, AtomicInteger>
+            activePreparations = new ConcurrentHashMap<>();
 
     public AnalysisOrchestrator(
             AnalysisTaskService analysisTaskService,
@@ -54,39 +59,67 @@ public class AnalysisOrchestrator {
     }
 
     public boolean start(Integer taskId) {
+        return start(taskId, null);
+    }
+
+    public boolean start(
+            Integer taskId,
+            GitCredentials credentials
+    ) {
         Objects.requireNonNull(taskId, "taskId не должен быть null");
-
-        boolean taskClaimed = analysisTaskService.updateStatusIfCurrent(
-                taskId,
-                AnalysisTaskStatus.NEW,
-                AnalysisTaskStatus.CLONING
-        );
-
-        if (!taskClaimed) {
-            log.debug(
-                    "Задача анализа {} уже запущена или не существует",
-                    taskId
-            );
-            return false;
-        }
+        boolean submitted = false;
+        markPreparationStarted(taskId);
 
         try {
-            analysisExecutor.execute(() -> runAnalysis(taskId));
+            boolean taskClaimed = analysisTaskService.updateStatusIfCurrent(
+                    taskId,
+                    AnalysisTaskStatus.NEW,
+                    AnalysisTaskStatus.CLONING
+            );
+
+            if (!taskClaimed) {
+                log.debug(
+                        "Задача анализа {} уже запущена или не существует",
+                        taskId
+                );
+                return false;
+            }
+
+            analysisExecutor.execute(
+                    () -> runAnalysis(taskId, credentials)
+            );
+            submitted = true;
             return true;
         } catch (RejectedExecutionException exception) {
             returnTaskToNew(taskId, exception);
             throw exception;
+        } finally {
+            if (!submitted) {
+                markPreparationFinished(taskId);
+                closeCredentials(credentials);
+            }
         }
     }
 
-    private void runAnalysis(Integer taskId) {
+    private void runAnalysis(
+            Integer taskId,
+            GitCredentials credentials
+    ) {
         try {
             AnalysisTask task = analysisTaskService.getById(taskId);
 
-            gitService.cloneOrUpdateRepository(
-                    task.getRepositoryUrl(),
-                    task.getBranch()
-            );
+            if (credentials == null) {
+                gitService.cloneOrUpdateRepository(
+                        task.getRepositoryUrl(),
+                        task.getBranch()
+                );
+            } else {
+                gitService.cloneOrUpdateRepository(
+                        task.getRepositoryUrl(),
+                        task.getBranch(),
+                        credentials
+                );
+            }
 
             boolean discoveryStarted = analysisTaskService.updateStatusIfCurrent(
                     taskId,
@@ -140,6 +173,42 @@ public class AnalysisOrchestrator {
             startCommitWorkers(taskId);
         } catch (Exception exception) {
             markTaskAsFailed(taskId, exception);
+        } finally {
+            markPreparationFinished(taskId);
+            closeCredentials(credentials);
+        }
+    }
+
+    public boolean isPreparationRunning(Integer taskId) {
+        AtomicInteger count = activePreparations.get(taskId);
+        return count != null && count.get() > 0;
+    }
+
+    private void markPreparationStarted(Integer taskId) {
+        activePreparations.compute(
+                taskId,
+                (ignored, count) -> {
+                    if (count == null) {
+                        return new AtomicInteger(1);
+                    }
+                    count.incrementAndGet();
+                    return count;
+                }
+        );
+    }
+
+    private void markPreparationFinished(Integer taskId) {
+        activePreparations.computeIfPresent(
+                taskId,
+                (ignored, count) -> count.decrementAndGet() == 0
+                        ? null
+                        : count
+        );
+    }
+
+    private void closeCredentials(GitCredentials credentials) {
+        if (credentials != null) {
+            credentials.close();
         }
     }
 

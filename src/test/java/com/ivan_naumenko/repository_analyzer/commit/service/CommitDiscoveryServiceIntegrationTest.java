@@ -1,6 +1,7 @@
 package com.ivan_naumenko.repository_analyzer.commit.service;
 
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
+import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.analysis.repository.AnalysisTaskRepository;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskService;
 import com.ivan_naumenko.repository_analyzer.commit.model.CommitParent;
@@ -150,6 +151,7 @@ class CommitDiscoveryServiceIntegrationTest {
                 "Concurrent claim"
         );
         discoveryService.saveDiscoveredCommits(task.getId(), List.of(gitCommit));
+        moveToProcessing(task.getId());
 
         ExecutorService workers = Executors.newFixedThreadPool(2);
         CountDownLatch start = new CountDownLatch(1);
@@ -187,6 +189,24 @@ class CommitDiscoveryServiceIntegrationTest {
             workers.shutdownNow();
             assertTrue(workers.awaitTermination(5, TimeUnit.SECONDS));
         }
+    }
+
+    private void moveToProcessing(Integer taskId) {
+        assertTrue(analysisTaskService.updateStatusIfCurrent(
+                taskId,
+                AnalysisTaskStatus.NEW,
+                AnalysisTaskStatus.CLONING
+        ));
+        assertTrue(analysisTaskService.updateStatusIfCurrent(
+                taskId,
+                AnalysisTaskStatus.CLONING,
+                AnalysisTaskStatus.DISCOVERING_COMMITS
+        ));
+        assertTrue(analysisTaskService.updateStatusIfCurrent(
+                taskId,
+                AnalysisTaskStatus.DISCOVERING_COMMITS,
+                AnalysisTaskStatus.PROCESSING
+        ));
     }
 
     private static Path createTestDatabasePath() {

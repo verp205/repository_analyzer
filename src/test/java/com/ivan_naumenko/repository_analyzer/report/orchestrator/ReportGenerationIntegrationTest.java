@@ -40,6 +40,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
@@ -133,7 +134,49 @@ class ReportGenerationIntegrationTest {
         assertNotNull(response.content());
         assertTrue(response.content().contains(COMMIT_HASH));
         assertTrue(response.content().contains("Демонстрационный LLM-ответ"));
-        assertEquals(1, cacheRepository.count());
+        assertTrue(response.content().contains("## 1. Общая картина проекта"));
+        assertTrue(response.content().contains(
+                "## 10. Приложение: анализ отдельных коммитов"
+        ));
+        assertEquals(2, cacheRepository.count());
+    }
+
+    @Test
+    void generatesIndependentReportsForTwoAudiences() throws Exception {
+        AnalysisTask task = createCompletedTask();
+        AnalysisReport developer = reportService.createOrGet(
+                task.getId(),
+                ReportAudience.DEVELOPER
+        );
+        AnalysisReport security = reportService.createOrGet(
+                task.getId(),
+                ReportAudience.SECURITY
+        );
+
+        assertNotEquals(developer.getId(), security.getId());
+        assertTrue(orchestrator.start(developer.getId()));
+        assertTrue(orchestrator.start(security.getId()));
+
+        AnalysisReportResponse developerResponse = waitForCompletion(
+                developer.getId(),
+                Duration.ofSeconds(5)
+        );
+        AnalysisReportResponse securityResponse = waitForCompletion(
+                security.getId(),
+                Duration.ofSeconds(5)
+        );
+
+        assertEquals(ReportStatus.COMPLETED, developerResponse.status());
+        assertEquals(ReportStatus.COMPLETED, securityResponse.status());
+        assertEquals(ReportAudience.DEVELOPER, developerResponse.audience());
+        assertEquals(ReportAudience.SECURITY, securityResponse.audience());
+        assertTrue(developerResponse.content().contains(
+                "Аудитория: Разработчик"
+        ));
+        assertTrue(securityResponse.content().contains(
+                "Аудитория: Специалист по безопасности"
+        ));
+        assertEquals(4, cacheRepository.count());
     }
 
     private AnalysisTask createCompletedTask() {

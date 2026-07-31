@@ -39,6 +39,23 @@ public interface AnalysisTaskRepository extends JpaRepository<AnalysisTask, Inte
             @Param("updatedAt") LocalDateTime updatedAt
     );
 
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query("""
+        UPDATE AnalysisTask task
+        SET task.status = :newStatus,
+            task.updatedAt = :updatedAt
+        WHERE task.id = :taskId
+          AND task.status IN :expectedStatuses
+        """)
+    int updateStatusIfCurrentIn(
+            @Param("taskId") Integer taskId,
+            @Param("expectedStatuses")
+            Collection<AnalysisTaskStatus> expectedStatuses,
+            @Param("newStatus") AnalysisTaskStatus newStatus,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
     @Query("""
     SELECT new com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskRecoveryCandidate(
         task.id,

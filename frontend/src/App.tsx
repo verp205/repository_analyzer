@@ -5,6 +5,7 @@ import {
   GitFork,
   Moon,
   RotateCcw,
+  Square,
   Sparkles,
   Sun,
 } from "lucide-react";
@@ -19,6 +20,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { AnalysisTimeline } from "@/components/AnalysisTimeline";
+import { GitCredentialsFields } from "@/components/GitCredentialsFields";
 import { HelpAccordion } from "@/components/HelpAccordion";
 import { InsightsPanel } from "@/components/InsightsPanel";
 import { RecentAnalyses } from "@/components/RecentAnalyses";
@@ -27,12 +29,14 @@ import {
   type AnalysisRequest,
 } from "@/components/RepositoryForm";
 import { ReportPanel } from "@/components/ReportPanel";
+import { AudienceSelect } from "@/components/ui/audience-select";
 import { FlowHoverButton } from "@/components/ui/flow-hover-button";
 import { api } from "@/lib/api";
 import type {
   AnalysisProgress,
   AnalysisReport,
   AnalysisTask,
+  AnalysisTaskStatus,
   CommitClusters,
   CommitGraph,
   ReportAudience,
@@ -51,6 +55,12 @@ type ThemeRipple = {
 };
 
 const hiddenHistoryKey = "repository-analyzer-hidden-history";
+const cancellableTaskStatuses: AnalysisTaskStatus[] = [
+  "NEW",
+  "CLONING",
+  "DISCOVERING_COMMITS",
+  "PROCESSING",
+];
 
 interface ThemeViewTransition {
   ready: Promise<void>;
@@ -86,6 +96,8 @@ function initialHiddenTaskIds() {
 export default function App() {
   const reduceMotion = useReducedMotion();
   const [theme, setTheme] = useState<Theme>(initialTheme);
+  const [retryGitUsername, setRetryGitUsername] = useState("");
+  const [retryGitAccessToken, setRetryGitAccessToken] = useState("");
   const [themeRipple, setThemeRipple] = useState<ThemeRipple | null>(null);
   const [tasks, setTasks] = useState<AnalysisTask[]>([]);
   const [hiddenTaskIds, setHiddenTaskIds] =
@@ -98,10 +110,13 @@ export default function App() {
   const [liveContent, setLiveContent] = useState("");
   const [audience, setAudience] = useState<ReportAudience>("DEVELOPER");
   const [submitting, setSubmitting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancellingReport, setCancellingReport] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>("checking");
   const reportRequestKey = useRef("");
+  const restartingRecoveredReportId = useRef<number | null>(null);
   const lastLiveCommit = useRef(0);
   const taskId = task?.id ?? null;
   const taskStatus = task?.status ?? null;
@@ -162,7 +177,16 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!taskId || taskStatus === "COMPLETED" || taskStatus === "FAILED") {
+    const cancellationSettled =
+      taskStatus === "CANCELLED" &&
+      (progress?.processingCommits ?? 0) === 0;
+
+    if (
+      !taskId ||
+      taskStatus === "COMPLETED" ||
+      taskStatus === "FAILED" ||
+      cancellationSettled
+    ) {
       return;
     }
 
@@ -176,7 +200,12 @@ export default function App() {
         if (disposed) return;
         setTask(freshTask);
         setProgress(freshProgress);
-        if (freshTask.status === "COMPLETED" || freshTask.status === "FAILED") {
+        if (
+          freshTask.status === "COMPLETED" ||
+          freshTask.status === "FAILED" ||
+          (freshTask.status === "CANCELLED" &&
+            freshProgress.processingCommits === 0)
+        ) {
           clearInterval(timer);
           void refreshTasks();
         }
@@ -191,7 +220,7 @@ export default function App() {
       disposed = true;
       clearInterval(timer);
     };
-  }, [taskId, taskStatus, refreshTasks]);
+  }, [taskId, taskStatus, progress?.processingCommits, refreshTasks]);
 
   useEffect(() => {
     if (!taskId || taskStatus !== "COMPLETED") return;
@@ -236,7 +265,46 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!reportId || reportStatus === "COMPLETED" || reportStatus === "FAILED") {
+    if (
+      !report ||
+      report.status !== "NEW" ||
+      taskStatus !== "COMPLETED" ||
+      restartingRecoveredReportId.current === report.id
+    ) {
+      return;
+    }
+
+    restartingRecoveredReportId.current = report.id;
+    let disposed = false;
+    void api
+      .createReport(report.analysisTaskId, report.audience)
+      .then((restarted) => {
+        if (disposed) return;
+        if (restarted.status !== "NEW") {
+          restartingRecoveredReportId.current = null;
+        }
+        setReport(restarted);
+        setLiveContent(restarted.content || "");
+        lastLiveCommit.current = restarted.processedCommits;
+      })
+      .catch((caught) => {
+        if (disposed) return;
+        restartingRecoveredReportId.current = null;
+        setError(errorMessage(caught));
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [report, taskStatus]);
+
+  useEffect(() => {
+    if (
+      !reportId ||
+      reportStatus === "COMPLETED" ||
+      reportStatus === "FAILED" ||
+      reportStatus === "CANCELLED"
+    ) {
       return;
     }
 
@@ -265,14 +333,23 @@ export default function App() {
         setLiveContent((current) => current + event.contentChunk);
         lastLiveCommit.current = event.processedCommits;
       }
-      if (event.type === "COMPLETED" || event.type === "FAILED") {
+      if (
+        event.type === "COMPLETED" ||
+        event.type === "FAILED" ||
+        event.type === "CANCELLED"
+      ) {
         void refreshReport(event.reportId);
       }
     };
 
-    ["snapshot", "summary", "progress", "completed", "failed"].forEach(
-      (eventName) => source.addEventListener(eventName, handleEvent),
-    );
+    [
+      "snapshot",
+      "summary",
+      "progress",
+      "completed",
+      "failed",
+      "cancelled",
+    ].forEach((eventName) => source.addEventListener(eventName, handleEvent));
 
     const timer = setInterval(() => {
       void refreshReport(reportId).catch(() => undefined);
@@ -300,6 +377,8 @@ export default function App() {
       const created = await api.createTask(
         request.repositoryUrl,
         request.branch,
+        request.gitUsername,
+        request.gitAccessToken,
       );
       setTask(created);
       setHiddenTaskIds((current) => current.filter((id) => id !== created.id));
@@ -315,7 +394,12 @@ export default function App() {
     if (!task) return;
     setError(null);
     try {
-      const retried = await api.retryTask(task.id);
+      const retried = await api.retryTask(
+        task.id,
+        retryGitUsername.trim() || undefined,
+        retryGitAccessToken || undefined,
+      );
+      setRetryGitAccessToken("");
       setTask(retried);
       setGraph(null);
       setClusters(null);
@@ -323,6 +407,24 @@ export default function App() {
       reportRequestKey.current = "";
     } catch (caught) {
       setError(errorMessage(caught));
+    }
+  }
+
+  async function cancelTask() {
+    if (!task) return;
+    setCancelling(true);
+    setError(null);
+
+    try {
+      const cancelled = await api.cancelTask(task.id);
+      setTask(cancelled);
+      setReport(null);
+      reportRequestKey.current = "";
+      void refreshTasks();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setCancelling(false);
     }
   }
 
@@ -336,6 +438,21 @@ export default function App() {
       lastLiveCommit.current = 0;
     } catch (caught) {
       setError(errorMessage(caught));
+    }
+  }
+
+  async function cancelReport() {
+    if (!report || report.status !== "PROCESSING") return;
+    setCancellingReport(true);
+    setError(null);
+    try {
+      const cancelled = await api.cancelReport(report.id);
+      setReport(cancelled);
+      if (cancelled.content) setLiveContent(cancelled.content);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setCancellingReport(false);
     }
   }
 
@@ -353,6 +470,15 @@ export default function App() {
     } catch (caught) {
       setError(errorMessage(caught));
     }
+  }
+
+  function selectReportAudience(nextAudience: ReportAudience) {
+    if (nextAudience === audience) return;
+    setAudience(nextAudience);
+    setReport(null);
+    setLiveContent("");
+    reportRequestKey.current = "";
+    lastLiveCommit.current = 0;
   }
 
   function toggleTheme(event: ReactMouseEvent<HTMLButtonElement>) {
@@ -515,7 +641,6 @@ export default function App() {
           initial={reduceMotion ? false : { opacity: 0 }}
           transition={{ duration: reduceMotion ? 0 : 0.5 }}
         >
-          <div className="ambient-glow" />
           <div className="relative mx-auto max-w-[1180px]">
             <motion.header
               animate={{ opacity: 1, y: 0 }}
@@ -628,6 +753,21 @@ export default function App() {
                           <p className="mt-1 break-all font-mono text-xs text-muted">
                             {task.repositoryUrl}
                           </p>
+                          {task.status === "COMPLETED" && (
+                            <div className="mt-4 w-full max-w-sm">
+                              <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">
+                                Версия отчёта
+                              </p>
+                              <AudienceSelect
+                                onChange={selectReportAudience}
+                                placement="bottom"
+                                value={audience}
+                              />
+                              <p className="mt-2 text-[10px] leading-4 text-muted">
+                                Для каждой роли создаётся отдельный отчёт.
+                              </p>
+                            </div>
+                          )}
                         </div>
                         {task.status === "COMPLETED" && (
                           <span className="flex items-center gap-1.5 rounded-full bg-success-soft px-3 py-1.5 text-xs font-medium text-success">
@@ -653,15 +793,55 @@ export default function App() {
                       )}
                     </div>
 
-                    {task.status === "FAILED" && (
+                    {cancellableTaskStatuses.includes(task.status) && (
                       <FlowHoverButton
-                        className="mt-6 self-start"
-                        icon={<RotateCcw className="size-4" />}
-                        onClick={() => void retryTask()}
+                        className="mt-6 self-start border-red-300 text-red-700 before:bg-red-700 hover:text-white dark:border-red-900/70 dark:text-red-300 dark:before:bg-red-300 dark:hover:text-red-950"
+                        disabled={cancelling}
+                        icon={<Square className="size-3.5 fill-current" />}
+                        onClick={() => void cancelTask()}
                         type="button"
                       >
-                        Повторить анализ
+                        {cancelling ? "Останавливаем…" : "Остановить анализ"}
                       </FlowHoverButton>
+                    )}
+
+                    {(task.status === "FAILED" ||
+                      task.status === "CANCELLED") && (
+                      <div className="mt-6 max-w-2xl space-y-3">
+                        {task.status === "CANCELLED" && (
+                          <p className="text-xs leading-5 text-muted">
+                            Новые коммиты больше не запускаются. Возобновление
+                            станет доступно после завершения уже начатых
+                            операций.
+                          </p>
+                        )}
+                        <GitCredentialsFields
+                          accessToken={retryGitAccessToken}
+                          disabled={
+                            task.status === "CANCELLED" &&
+                            (progress?.processingCommits ?? 0) > 0
+                          }
+                          onAccessTokenChange={setRetryGitAccessToken}
+                          onUsernameChange={setRetryGitUsername}
+                          username={retryGitUsername}
+                        />
+                        <FlowHoverButton
+                          className="self-start"
+                          disabled={
+                            task.status === "CANCELLED" &&
+                            (progress?.processingCommits ?? 0) > 0
+                          }
+                          icon={<RotateCcw className="size-4" />}
+                          onClick={() => void retryTask()}
+                          type="button"
+                        >
+                          {task.status === "CANCELLED"
+                            ? (progress?.processingCommits ?? 0) > 0
+                              ? "Завершаем текущие операции…"
+                              : "Возобновить анализ"
+                            : "Повторить анализ"}
+                        </FlowHoverButton>
+                      </div>
                     )}
                   </section>
 
@@ -678,7 +858,9 @@ export default function App() {
                 )}
 
                 <ReportPanel
+                  cancelling={cancellingReport}
                   liveContent={liveContent}
+                  onCancel={cancelReport}
                   onRetry={retryReport}
                   report={report}
                 />
@@ -705,7 +887,7 @@ export default function App() {
                         ease: [0.22, 1, 0.36, 1],
                       }}
                     >
-                      <FeatureIcon className="mb-3 size-4 text-accent" />
+                      <FeatureIcon className="mb-3 size-4 text-accent opacity-65" />
                       <p className="text-sm font-semibold text-ink">{String(title)}</p>
                       <p className="mt-1 text-xs leading-5 text-muted">{String(description)}</p>
                     </motion.div>

@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -36,15 +37,15 @@ class PromptFactoryTest {
 
         String prompt = factory.build(context, ReportAudience.SECURITY);
 
-        assertTrue(prompt.contains("PROMPT_VERSION: v2"));
-        assertTrue(prompt.contains("RESPONSE_LANGUAGE:"));
-        assertTrue(prompt.contains(
-                "Сформируй весь ответ исключительно на русском языке"
-        ));
-        assertTrue(prompt.contains("AUDIENCE_INSTRUCTION:"));
-        assertTrue(prompt.contains("безопасности"));
-        assertTrue(prompt.contains("<TECHNICAL_CONTEXT>"));
+        assertTrue(prompt.contains("PROMPT_VERSION: commit-v4-compact"));
+        assertTrue(prompt.contains("LANGUAGE: Русский"));
+        assertTrue(prompt.contains("РОЛЕВОЙ ФОКУС:"));
+        assertTrue(prompt.contains("границ доверия"));
+        assertTrue(prompt.contains("<CONTEXT>"));
         assertTrue(prompt.contains(CONTEXT_JSON));
+        assertTrue(prompt.contains("Не используй таблицы"));
+        assertTrue(prompt.length() < 3_500);
+        assertFalse(prompt.contains("| Файл |"));
         verify(serializer).serialize(context);
     }
 

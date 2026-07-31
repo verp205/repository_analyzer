@@ -3,6 +3,7 @@ package com.ivan_naumenko.repository_analyzer.llm.coordinator;
 import com.ivan_naumenko.repository_analyzer.llm.cache.service.LlmCacheService;
 import com.ivan_naumenko.repository_analyzer.llm.client.LlmClient;
 import com.ivan_naumenko.repository_analyzer.llm.client.exception.LlmRequestException;
+import com.ivan_naumenko.repository_analyzer.llm.client.model.LlmRequestProfile;
 import com.ivan_naumenko.repository_analyzer.llm.prompt.service.PromptHashService;
 import com.ivan_naumenko.repository_analyzer.persistence.SqliteWriteCoordinator;
 import com.ivan_naumenko.repository_analyzer.report.model.ReportAudience;
@@ -30,9 +31,22 @@ public class LlmRequestCoordinator {
             String prompt,
             ReportAudience audience
     ) {
+        return getOrGenerate(
+                prompt,
+                audience,
+                LlmRequestProfile.COMMIT_ANALYSIS
+        );
+    }
+
+    public String getOrGenerate(
+            String prompt,
+            ReportAudience audience,
+            LlmRequestProfile profile
+    ) {
         Objects.requireNonNull(audience, "audience не должен быть null");
+        Objects.requireNonNull(profile, "profile не должен быть null");
         String cacheNamespace = Objects.requireNonNull(
-                llmClient.cacheNamespace(),
+                llmClient.cacheNamespace(profile),
                 "LLM cacheNamespace не должен быть null"
         );
         String promptHash = promptHashService.calculate(
@@ -64,7 +78,7 @@ public class LlmRequestCoordinator {
                 return response;
             }
 
-            String generated = llmClient.generate(prompt);
+            String generated = llmClient.generate(prompt, profile);
             String stored = writeCoordinator.execute(
                     () -> cacheService.saveResponse(
                             promptHash,

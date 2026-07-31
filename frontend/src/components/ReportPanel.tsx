@@ -1,4 +1,10 @@
-import { Download, FileText, LoaderCircle, RotateCcw } from "lucide-react";
+import {
+  Download,
+  FileText,
+  LoaderCircle,
+  RotateCcw,
+  Square,
+} from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import ReactMarkdown from "react-markdown";
 import { useEffect, useState } from "react";
@@ -11,12 +17,20 @@ import { createReportPdfBlob } from "@/lib/pdf";
 import type { AnalysisReport } from "@/lib/types";
 
 interface ReportPanelProps {
+  cancelling: boolean;
   report: AnalysisReport | null;
   liveContent: string;
+  onCancel: () => Promise<void>;
   onRetry: () => Promise<void>;
 }
 
-export function ReportPanel({ report, liveContent, onRetry }: ReportPanelProps) {
+export function ReportPanel({
+  cancelling,
+  report,
+  liveContent,
+  onCancel,
+  onRetry,
+}: ReportPanelProps) {
   const reduceMotion = useReducedMotion();
   const [pdfAsset, setPdfAsset] = useState<{
     key: string;
@@ -101,14 +115,27 @@ export function ReportPanel({ report, liveContent, onRetry }: ReportPanelProps) 
               {report.status === "COMPLETED"
                 ? "Формирование завершено"
                 : report.status === "FAILED"
-                  ? "Формирование остановлено"
-                  : `Формируется в реальном времени · ${percentage}%`}
+                  ? "Формирование завершилось ошибкой"
+                  : report.status === "CANCELLED"
+                    ? "Формирование остановлено пользователем"
+                    : `Формируется в реальном времени · ${percentage}%`}
             </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {report.status === "PROCESSING" && (
             <LoaderCircle className="size-5 animate-spin text-accent motion-reduce:animate-none" />
+          )}
+          {report.status === "PROCESSING" && (
+            <FlowHoverButton
+              className="border-red-300 text-red-700 before:bg-red-700 hover:text-white dark:border-red-900/70 dark:text-red-300 dark:before:bg-red-300 dark:hover:text-red-950"
+              disabled={cancelling}
+              icon={<Square className="size-3.5 fill-current" />}
+              onClick={() => void onCancel()}
+              type="button"
+            >
+              {cancelling ? "Останавливаем…" : "Остановить отчёт"}
+            </FlowHoverButton>
           )}
           {content && pdfUrl && (
             <FlowHoverLink
@@ -134,7 +161,7 @@ export function ReportPanel({ report, liveContent, onRetry }: ReportPanelProps) 
                   : "PDF после завершения"}
             </FlowHoverButton>
           )}
-          {report.status === "FAILED" && (
+          {(report.status === "FAILED" || report.status === "CANCELLED") && (
             <FlowHoverButton
               icon={<RotateCcw className="size-4" />}
               onClick={() => void onRetry()}

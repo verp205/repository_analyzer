@@ -2,6 +2,7 @@ package com.ivan_naumenko.repository_analyzer.llm.coordinator;
 
 import com.ivan_naumenko.repository_analyzer.llm.cache.service.LlmCacheService;
 import com.ivan_naumenko.repository_analyzer.llm.client.LlmClient;
+import com.ivan_naumenko.repository_analyzer.llm.client.model.LlmRequestProfile;
 import com.ivan_naumenko.repository_analyzer.llm.prompt.service.PromptHashService;
 import com.ivan_naumenko.repository_analyzer.report.model.ReportAudience;
 import com.ivan_naumenko.repository_analyzer.persistence.SqliteWriteCoordinator;
@@ -36,6 +37,8 @@ class LlmRequestCoordinatorTest {
     private static final String HASH_INPUT = CACHE_NAMESPACE + "\n" + PROMPT;
     private static final String HASH = "a".repeat(64);
     private static final String RESPONSE = "Analysis result";
+    private static final LlmRequestProfile PROFILE =
+            LlmRequestProfile.COMMIT_ANALYSIS;
 
     @Mock
     private LlmCacheService cacheService;
@@ -71,7 +74,7 @@ class LlmRequestCoordinatorTest {
         AtomicInteger calls = new AtomicInteger();
         CountDownLatch enteredLlm = new CountDownLatch(1);
         CountDownLatch releaseLlm = new CountDownLatch(1);
-        when(llmClient.generate(PROMPT)).thenAnswer(ignored -> {
+        when(llmClient.generate(PROMPT, PROFILE)).thenAnswer(ignored -> {
             calls.incrementAndGet();
             enteredLlm.countDown();
             if (!releaseLlm.await(5, TimeUnit.SECONDS)) {
@@ -114,7 +117,7 @@ class LlmRequestCoordinatorTest {
         }
 
         assertEquals(1, calls.get());
-        verify(llmClient).generate(PROMPT);
+        verify(llmClient).generate(PROMPT, PROFILE);
         verify(cacheService).saveResponse(
                 HASH,
                 CACHE_NAMESPACE,
@@ -128,7 +131,7 @@ class LlmRequestCoordinatorTest {
     void removesFailedRequestSoItCanBeRetried() {
         when(hashService.calculate(HASH_INPUT)).thenReturn(HASH);
         when(cacheService.findResponse(HASH)).thenReturn(Optional.empty());
-        when(llmClient.generate(PROMPT))
+        when(llmClient.generate(PROMPT, PROFILE))
                 .thenThrow(new IllegalStateException("first failure"))
                 .thenReturn(RESPONSE);
         when(cacheService.saveResponse(
@@ -155,7 +158,7 @@ class LlmRequestCoordinatorTest {
     }
 
     private LlmRequestCoordinator coordinator() {
-        when(llmClient.cacheNamespace()).thenReturn(CACHE_NAMESPACE);
+        when(llmClient.cacheNamespace(PROFILE)).thenReturn(CACHE_NAMESPACE);
         return new LlmRequestCoordinator(
                 cacheService,
                 hashService,

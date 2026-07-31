@@ -12,12 +12,20 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.util.Optional;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
 public class AnalysisTaskService {
+
+    private static final List<AnalysisTaskStatus> CANCELLABLE_STATUSES = List.of(
+            AnalysisTaskStatus.NEW,
+            AnalysisTaskStatus.CLONING,
+            AnalysisTaskStatus.DISCOVERING_COMMITS,
+            AnalysisTaskStatus.PROCESSING
+    );
 
     private final AnalysisTaskRepository repository;
     private final SqliteWriteCoordinator writeCoordinator;
@@ -86,6 +94,19 @@ public class AnalysisTaskService {
                         taskId,
                         expectedStatus,
                         newStatus,
+                        LocalDateTime.now()
+                ) == 1
+        );
+    }
+
+    public boolean cancel(Integer taskId) {
+        Objects.requireNonNull(taskId, "taskId не должен быть null");
+
+        return writeCoordinator.execute(
+                () -> repository.updateStatusIfCurrentIn(
+                        taskId,
+                        CANCELLABLE_STATUSES,
+                        AnalysisTaskStatus.CANCELLED,
                         LocalDateTime.now()
                 ) == 1
         );

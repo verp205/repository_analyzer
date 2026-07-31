@@ -11,6 +11,7 @@ const taskStatusLabels: Record<AnalysisTaskStatus, string> = {
   PROCESSING: "Анализируется",
   COMPLETED: "Готово",
   FAILED: "Ошибка",
+  CANCELLED: "Остановлен",
 };
 
 const reportStatusLabels: Record<ReportStatus, string> = {
@@ -18,6 +19,7 @@ const reportStatusLabels: Record<ReportStatus, string> = {
   PROCESSING: "Формируется",
   COMPLETED: "Готово",
   FAILED: "Ошибка",
+  CANCELLED: "Остановлен",
 };
 
 const audienceLabels: Record<ReportAudience, string> = {

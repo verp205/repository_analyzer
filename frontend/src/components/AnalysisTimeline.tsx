@@ -1,4 +1,4 @@
-import { Check, LoaderCircle, X } from "lucide-react";
+import { Check, LoaderCircle, Square, X } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import type {
   AnalysisProgress,
@@ -15,7 +15,12 @@ interface AnalysisTimelineProps {
   insightsReady: boolean;
 }
 
-type StepState = "waiting" | "active" | "complete" | "failed";
+type StepState =
+  | "waiting"
+  | "active"
+  | "complete"
+  | "failed"
+  | "cancelled";
 
 export function AnalysisTimeline({
   task,
@@ -59,6 +64,7 @@ export function AnalysisTimeline({
 
   function stateFor(step: number): StepState {
     if (!task) return "waiting";
+    if (technicalStatus === "CANCELLED") return "waiting";
     if (technicalStatus === "FAILED" && step <= 3) {
       return step === 3 ? "failed" : "complete";
     }
@@ -83,6 +89,7 @@ export function AnalysisTimeline({
       return technicalStatus === "COMPLETED" ? "active" : "waiting";
     }
     if (report?.status === "FAILED") return "failed";
+    if (report?.status === "CANCELLED") return "cancelled";
     if (report?.status === "COMPLETED") return "complete";
     if (report?.status === "PROCESSING" || report?.status === "NEW") {
       return "active";
@@ -135,6 +142,8 @@ export function AnalysisTimeline({
                   "border-line bg-panel text-muted",
                 step.state === "failed" &&
                   "border-red-400 bg-red-50 text-red-600 dark:bg-red-950/30",
+                step.state === "cancelled" &&
+                  "border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300",
               )}
             >
               {step.state === "complete" ? (
@@ -143,6 +152,8 @@ export function AnalysisTimeline({
                 <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />
               ) : step.state === "failed" ? (
                 <X className="size-4" />
+              ) : step.state === "cancelled" ? (
+                <Square className="size-3 fill-current" />
               ) : (
                 index + 1
               )}

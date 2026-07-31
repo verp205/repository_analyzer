@@ -5,5 +5,15 @@ public enum ReportAudience {
     ANALYST,
     SECURITY,
     TEAM_LEAD,
-    DIRECTOR
+    DIRECTOR;
+
+    public String displayName() {
+        return switch (this) {
+            case DEVELOPER -> "Разработчик";
+            case ANALYST -> "Аналитик";
+            case SECURITY -> "Специалист по безопасности";
+            case TEAM_LEAD -> "Тимлид";
+            case DIRECTOR -> "Директор";
+        };
+    }
 }

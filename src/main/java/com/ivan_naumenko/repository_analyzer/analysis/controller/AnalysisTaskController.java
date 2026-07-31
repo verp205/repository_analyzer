@@ -3,12 +3,15 @@ package com.ivan_naumenko.repository_analyzer.analysis.controller;
 import com.ivan_naumenko.repository_analyzer.analysis.dto.AnalysisTaskResponse;
 import com.ivan_naumenko.repository_analyzer.analysis.dto.CreateAnalysisTaskRequest;
 import com.ivan_naumenko.repository_analyzer.analysis.dto.AnalysisTaskProgressResponse;
+import com.ivan_naumenko.repository_analyzer.analysis.dto.RetryAnalysisTaskRequest;
 import com.ivan_naumenko.repository_analyzer.analysis.mapper.TaskMapper;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
+import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.analysis.orchestrator.AnalysisOrchestrator;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisRecoveryService;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskService;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisProgressService;
+import com.ivan_naumenko.repository_analyzer.git.model.GitCredentials;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -55,7 +58,31 @@ public class AnalysisTaskController {
 
         AnalysisTask task = analysisTaskService.createOrGet(request.repositoryUrl(), request.branch());
 
-        boolean started = orchestrator.start(task.getId());
+        GitCredentials credentials = GitCredentials.from(
+                request.gitUsername(),
+                request.gitAccessToken()
+        );
+        boolean started;
+
+        if (task.getStatus() == AnalysisTaskStatus.FAILED) {
+            started = credentials == null
+                    ? analysisRecoveryService.retryFailedTask(task.getId())
+                    : analysisRecoveryService.retryFailedTask(
+                            task.getId(),
+                            credentials
+                    );
+        } else if (task.getStatus() == AnalysisTaskStatus.CANCELLED) {
+            started = credentials == null
+                    ? analysisRecoveryService.retryCancelledTask(task.getId())
+                    : analysisRecoveryService.retryCancelledTask(
+                            task.getId(),
+                            credentials
+                    );
+        } else {
+            started = credentials == null
+                    ? orchestrator.start(task.getId())
+                    : orchestrator.start(task.getId(), credentials);
+        }
 
         AnalysisTask updatedTask = analysisTaskService.getById(task.getId());
         AnalysisTaskResponse response = taskMapper.toResponse(updatedTask);
@@ -68,9 +95,33 @@ public class AnalysisTaskController {
     }
 
     @PostMapping("/{id}/retry")
-    public ResponseEntity<AnalysisTaskResponse> retryFailedTask(@PathVariable Integer id) {
+    public ResponseEntity<AnalysisTaskResponse> retryFailedTask(
+            @PathVariable Integer id,
+            @Valid @RequestBody(required = false)
+            RetryAnalysisTaskRequest request
+    ) {
 
-        boolean started = analysisRecoveryService.retryFailedTask(id);
+        GitCredentials credentials = request == null
+                ? null
+                : GitCredentials.from(
+                        request.gitUsername(),
+                        request.gitAccessToken()
+                );
+        AnalysisTask currentTask = analysisTaskService.getById(id);
+        boolean started;
+
+        if (currentTask.getStatus() == AnalysisTaskStatus.CANCELLED) {
+            started = credentials == null
+                    ? analysisRecoveryService.retryCancelledTask(id)
+                    : analysisRecoveryService.retryCancelledTask(
+                            id,
+                            credentials
+                    );
+        } else {
+            started = credentials == null
+                    ? analysisRecoveryService.retryFailedTask(id)
+                    : analysisRecoveryService.retryFailedTask(id, credentials);
+        }
 
         AnalysisTaskResponse response = taskMapper.toResponse(
                 analysisTaskService.getById(id)
@@ -78,6 +129,22 @@ public class AnalysisTaskController {
 
         if (started) {
             return ResponseEntity.accepted().body(response);
+        }
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
+    @PostMapping("/{id}/cancel")
+    public ResponseEntity<AnalysisTaskResponse> cancelAnalysis(
+            @PathVariable Integer id
+    ) {
+        boolean cancelled = analysisTaskService.cancel(id);
+        AnalysisTaskResponse response = taskMapper.toResponse(
+                analysisTaskService.getById(id)
+        );
+
+        if (cancelled) {
+            return ResponseEntity.ok(response);
         }
 
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);

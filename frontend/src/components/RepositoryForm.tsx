@@ -1,5 +1,6 @@
 import { ArrowRight, GitBranch, LoaderCircle } from "lucide-react";
 import { type FormEvent, useState } from "react";
+import { GitCredentialsFields } from "@/components/GitCredentialsFields";
 import { AudienceSelect } from "@/components/ui/audience-select";
 import { FlowHoverButton } from "@/components/ui/flow-hover-button";
 import type { ReportAudience } from "@/lib/types";
@@ -8,6 +9,8 @@ export interface AnalysisRequest {
   repositoryUrl: string;
   branch: string;
   audience: ReportAudience;
+  gitAccessToken?: string;
+  gitUsername?: string;
 }
 
 interface RepositoryFormProps {
@@ -19,6 +22,8 @@ export function RepositoryForm({ loading, onSubmit }: RepositoryFormProps) {
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [branch, setBranch] = useState("main");
   const [audience, setAudience] = useState<ReportAudience>("DEVELOPER");
+  const [gitUsername, setGitUsername] = useState("");
+  const [gitAccessToken, setGitAccessToken] = useState("");
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -27,6 +32,8 @@ export function RepositoryForm({ loading, onSubmit }: RepositoryFormProps) {
       repositoryUrl: repositoryUrl.trim(),
       branch: branch.trim(),
       audience,
+      gitUsername: gitUsername.trim() || undefined,
+      gitAccessToken: gitAccessToken || undefined,
     });
   }
 
@@ -99,6 +106,16 @@ export function RepositoryForm({ loading, onSubmit }: RepositoryFormProps) {
         >
           {loading ? "Запускаем…" : "Начать анализ"}
         </FlowHoverButton>
+      </div>
+
+      <div className="mt-3">
+        <GitCredentialsFields
+          accessToken={gitAccessToken}
+          disabled={loading}
+          onAccessTokenChange={setGitAccessToken}
+          onUsernameChange={setGitUsername}
+          username={gitUsername}
+        />
       </div>
     </form>
   );

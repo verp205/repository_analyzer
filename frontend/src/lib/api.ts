@@ -40,13 +40,32 @@ export const api = {
     request<AnalysisTask>(`/api/analysis-tasks/${taskId}`),
   getProgress: (taskId: number) =>
     request<AnalysisProgress>(`/api/analysis-tasks/${taskId}/progress`),
-  createTask: (repositoryUrl: string, branch: string) =>
+  createTask: (
+    repositoryUrl: string,
+    branch: string,
+    gitUsername?: string,
+    gitAccessToken?: string,
+  ) =>
     request<AnalysisTask>("/api/analysis-tasks", {
       method: "POST",
-      body: JSON.stringify({ repositoryUrl, branch }),
+      body: JSON.stringify({
+        repositoryUrl,
+        branch,
+        gitUsername,
+        gitAccessToken,
+      }),
     }),
-  retryTask: (taskId: number) =>
+  retryTask: (
+    taskId: number,
+    gitUsername?: string,
+    gitAccessToken?: string,
+  ) =>
     request<AnalysisTask>(`/api/analysis-tasks/${taskId}/retry`, {
+      method: "POST",
+      body: JSON.stringify({ gitUsername, gitAccessToken }),
+    }),
+  cancelTask: (taskId: number) =>
+    request<AnalysisTask>(`/api/analysis-tasks/${taskId}/cancel`, {
       method: "POST",
     }),
   getGraph: (taskId: number) =>
@@ -64,6 +83,10 @@ export const api = {
     request<AnalysisReport>(`/api/reports/${reportId}`),
   retryReport: (reportId: number) =>
     request<AnalysisReport>(`/api/reports/${reportId}/retry`, {
+      method: "POST",
+    }),
+  cancelReport: (reportId: number) =>
+    request<AnalysisReport>(`/api/reports/${reportId}/cancel`, {
       method: "POST",
     }),
   reportEventsUrl: (reportId: number) =>

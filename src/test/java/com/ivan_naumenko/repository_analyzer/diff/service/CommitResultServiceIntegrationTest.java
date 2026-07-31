@@ -1,6 +1,7 @@
 package com.ivan_naumenko.repository_analyzer.diff.service;
 
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
+import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.analysis.repository.AnalysisTaskRepository;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskService;
 import com.ivan_naumenko.repository_analyzer.commit.model.CommitProcessingStatus;
@@ -224,6 +225,7 @@ class CommitResultServiceIntegrationTest {
                 ))
                 .toList();
         discoveryService.saveDiscoveredCommits(task.getId(), gitCommits);
+        moveToProcessing(task.getId());
 
         List<RepositoryCommit> claimed = java.util.stream.IntStream.range(0, 10)
                 .mapToObj(ignored -> claimService.claimRandomCommit(task.getId())
@@ -305,10 +307,29 @@ class CommitResultServiceIntegrationTest {
                 "Test commit"
         );
         discoveryService.saveDiscoveredCommits(task.getId(), List.of(gitCommit));
+        moveToProcessing(task.getId());
 
         Integer claimedId = claimService.claimRandomCommit(task.getId())
                 .orElseThrow();
         return commitRepository.findById(claimedId).orElseThrow();
+    }
+
+    private void moveToProcessing(Integer taskId) {
+        assertTrue(analysisTaskService.updateStatusIfCurrent(
+                taskId,
+                AnalysisTaskStatus.NEW,
+                AnalysisTaskStatus.CLONING
+        ));
+        assertTrue(analysisTaskService.updateStatusIfCurrent(
+                taskId,
+                AnalysisTaskStatus.CLONING,
+                AnalysisTaskStatus.DISCOVERING_COMMITS
+        ));
+        assertTrue(analysisTaskService.updateStatusIfCurrent(
+                taskId,
+                AnalysisTaskStatus.DISCOVERING_COMMITS,
+                AnalysisTaskStatus.PROCESSING
+        ));
     }
 
     private void await(CountDownLatch latch) {

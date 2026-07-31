@@ -66,8 +66,21 @@ public class AnalysisReportController {
     public ResponseEntity<AnalysisReportResponse> retry(
             @PathVariable Integer reportId
     ) {
-        if (!reportService.resetFailed(reportId)
+        if (!reportService.resetForRetry(reportId)
                 || !orchestrator.start(reportId)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(reportService.getResponse(reportId));
+        }
+
+        return ResponseEntity.accepted()
+                .body(reportService.getResponse(reportId));
+    }
+
+    @PostMapping("/reports/{reportId}/cancel")
+    public ResponseEntity<AnalysisReportResponse> cancel(
+            @PathVariable Integer reportId
+    ) {
+        if (!orchestrator.cancel(reportId)) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body(reportService.getResponse(reportId));
         }
@@ -85,7 +98,8 @@ public class AnalysisReportController {
         SseEmitter emitter = eventService.subscribe(reportId);
         AnalysisReportResponse current = reportService.getResponse(reportId);
         boolean terminal = current.status() == ReportStatus.COMPLETED
-                || current.status() == ReportStatus.FAILED;
+                || current.status() == ReportStatus.FAILED
+                || current.status() == ReportStatus.CANCELLED;
         eventService.sendSnapshot(
                 reportId,
                 emitter,
