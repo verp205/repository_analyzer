@@ -31,7 +31,7 @@ public class LlmCacheEntry {
     private String responseText;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "audience", nullable = false)
+    @Column(name = "audience")
     private ReportAudience audience;
 
     @Column(name = "created_at", nullable = false)

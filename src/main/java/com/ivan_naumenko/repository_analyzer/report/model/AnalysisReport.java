@@ -26,8 +26,8 @@ import java.time.LocalDateTime;
 @Table(
         name = "analysis_report",
         uniqueConstraints = @UniqueConstraint(
-                name = "uk_analysis_report_task_audience",
-                columnNames = {"analysis_task_id", "audience"}
+                name = "uk_analysis_report_task_audience_period",
+                columnNames = {"analysis_task_id", "audience", "period_key"}
         )
 )
 public class AnalysisReport {
@@ -44,6 +44,22 @@ public class AnalysisReport {
     @Enumerated(EnumType.STRING)
     @Column(name = "audience", nullable = false)
     private ReportAudience audience;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "period_type", nullable = false)
+    private ReportPeriodType periodType = ReportPeriodType.ALL;
+
+    @Column(name = "period_days")
+    private Integer periodDays;
+
+    @Column(name = "period_from")
+    private String periodFrom;
+
+    @Column(name = "period_to")
+    private String periodTo;
+
+    @Column(name = "period_key", nullable = false)
+    private String periodKey = "ALL";
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
@@ -66,4 +82,17 @@ public class AnalysisReport {
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    public ReportPeriod getPeriod() {
+        return new ReportPeriod(periodType, periodDays, periodFrom, periodTo);
+    }
+
+    public void setPeriod(ReportPeriod period) {
+        ReportPeriod value = period == null ? ReportPeriod.all() : period;
+        periodType = value.type();
+        periodDays = value.days();
+        periodFrom = value.fromTag();
+        periodTo = value.toTag();
+        periodKey = value.key();
+    }
 }

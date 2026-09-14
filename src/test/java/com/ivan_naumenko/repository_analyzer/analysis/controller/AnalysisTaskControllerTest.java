@@ -10,6 +10,8 @@ import com.ivan_naumenko.repository_analyzer.analysis.orchestrator.AnalysisOrche
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisRecoveryService;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskService;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisProgressService;
+import com.ivan_naumenko.repository_analyzer.git.model.GitCredentials;
+import com.ivan_naumenko.repository_analyzer.security.RepositoryUrlPolicy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,9 +24,12 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.time.LocalDateTime;
 import java.util.concurrent.RejectedExecutionException;
 
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -50,16 +55,22 @@ class AnalysisTaskControllerTest {
     @Mock
     private AnalysisOrchestrator orchestrator;
 
+    @Mock
+    private RepositoryUrlPolicy repositoryUrlPolicy;
+
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
+        lenient().when(repositoryUrlPolicy.validate(anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
         AnalysisTaskController controller = new AnalysisTaskController(
                 analysisTaskService,
                 analysisProgressService,
                 analysisRecoveryService,
                 new TaskMapper(),
-                orchestrator
+                orchestrator,
+                repositoryUrlPolicy
         );
 
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
@@ -92,6 +103,38 @@ class AnalysisTaskControllerTest {
 
         verify(orchestrator).start(TASK_ID);
         verify(analysisTaskService).getById(TASK_ID);
+    }
+
+    @Test
+    void passesPrivateRepositoryCredentialsToOrchestrator() throws Exception {
+        AnalysisTask newTask = task(AnalysisTaskStatus.NEW);
+        AnalysisTask cloningTask = task(AnalysisTaskStatus.CLONING);
+        when(analysisTaskService.createOrGet(REPOSITORY_URL, BRANCH))
+                .thenReturn(newTask);
+        when(orchestrator.start(
+                org.mockito.ArgumentMatchers.eq(TASK_ID),
+                any(GitCredentials.class)
+        )).thenReturn(true);
+        when(analysisTaskService.getById(TASK_ID)).thenReturn(cloningTask);
+
+        mockMvc.perform(post("/api/analysis-tasks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "repositoryUrl": "https://example.com/project.git",
+                                  "branch": "main",
+                                  "gitUsername": "ivan",
+                                  "gitAccessToken": "private-token"
+                                }
+                                """))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.id").value(TASK_ID))
+                .andExpect(jsonPath("$.gitAccessToken").doesNotExist());
+
+        verify(orchestrator).start(
+                org.mockito.ArgumentMatchers.eq(TASK_ID),
+                any(GitCredentials.class)
+        );
     }
 
     @Test
@@ -166,7 +209,10 @@ class AnalysisTaskControllerTest {
     void returnsAcceptedWhenFailedTaskRetryWasStarted() throws Exception {
         when(analysisRecoveryService.retryFailedTask(TASK_ID)).thenReturn(true);
         when(analysisTaskService.getById(TASK_ID))
-                .thenReturn(task(AnalysisTaskStatus.CLONING));
+                .thenReturn(
+                        task(AnalysisTaskStatus.FAILED),
+                        task(AnalysisTaskStatus.CLONING)
+                );
 
         mockMvc.perform(post("/api/analysis-tasks/{id}/retry", TASK_ID))
                 .andExpect(status().isAccepted())
@@ -174,6 +220,36 @@ class AnalysisTaskControllerTest {
                 .andExpect(jsonPath("$.status").value("CLONING"));
 
         verify(analysisRecoveryService).retryFailedTask(TASK_ID);
+    }
+
+    @Test
+    void passesCredentialsWhenRetryingPrivateRepository() throws Exception {
+        when(analysisRecoveryService.retryFailedTask(
+                org.mockito.ArgumentMatchers.eq(TASK_ID),
+                any(GitCredentials.class)
+        )).thenReturn(true);
+        when(analysisTaskService.getById(TASK_ID))
+                .thenReturn(
+                        task(AnalysisTaskStatus.FAILED),
+                        task(AnalysisTaskStatus.CLONING)
+                );
+
+        mockMvc.perform(post("/api/analysis-tasks/{id}/retry", TASK_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "gitUsername": "ivan",
+                                  "gitAccessToken": "private-token"
+                                }
+                                """))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.status").value("CLONING"))
+                .andExpect(jsonPath("$.gitAccessToken").doesNotExist());
+
+        verify(analysisRecoveryService).retryFailedTask(
+                org.mockito.ArgumentMatchers.eq(TASK_ID),
+                any(GitCredentials.class)
+        );
     }
 
     @Test
@@ -190,6 +266,8 @@ class AnalysisTaskControllerTest {
 
     @Test
     void returnsInternalServerErrorWhenRetryFails() throws Exception {
+        when(analysisTaskService.getById(TASK_ID))
+                .thenReturn(task(AnalysisTaskStatus.FAILED));
         when(analysisRecoveryService.retryFailedTask(TASK_ID))
                 .thenThrow(new AnalysisRecoveryException(
                         TASK_ID,
@@ -203,7 +281,50 @@ class AnalysisTaskControllerTest {
                         "Не удалось восстановить задачу анализа: " + TASK_ID
                 ));
 
-        verify(analysisTaskService, never()).getById(TASK_ID);
+        verify(analysisTaskService).getById(TASK_ID);
+    }
+
+    @Test
+    void returnsOkWhenActiveAnalysisWasCancelled() throws Exception {
+        when(analysisTaskService.cancel(TASK_ID)).thenReturn(true);
+        when(analysisTaskService.getById(TASK_ID))
+                .thenReturn(task(AnalysisTaskStatus.CANCELLED));
+
+        mockMvc.perform(post("/api/analysis-tasks/{id}/cancel", TASK_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(TASK_ID))
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+
+        verify(analysisTaskService).cancel(TASK_ID);
+    }
+
+    @Test
+    void returnsConflictWhenCompletedAnalysisCannotBeCancelled()
+            throws Exception {
+        when(analysisTaskService.cancel(TASK_ID)).thenReturn(false);
+        when(analysisTaskService.getById(TASK_ID))
+                .thenReturn(task(AnalysisTaskStatus.COMPLETED));
+
+        mockMvc.perform(post("/api/analysis-tasks/{id}/cancel", TASK_ID))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value("COMPLETED"));
+    }
+
+    @Test
+    void resumesCancelledAnalysis() throws Exception {
+        when(analysisTaskService.getById(TASK_ID))
+                .thenReturn(
+                        task(AnalysisTaskStatus.CANCELLED),
+                        task(AnalysisTaskStatus.CLONING)
+                );
+        when(analysisRecoveryService.retryCancelledTask(TASK_ID))
+                .thenReturn(true);
+
+        mockMvc.perform(post("/api/analysis-tasks/{id}/retry", TASK_ID))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.status").value("CLONING"));
+
+        verify(analysisRecoveryService).retryCancelledTask(TASK_ID);
     }
 
     @Test

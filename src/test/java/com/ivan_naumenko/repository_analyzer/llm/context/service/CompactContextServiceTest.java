@@ -12,6 +12,7 @@ import com.ivan_naumenko.repository_analyzer.javaanalysis.model.JavaTypeKind;
 import com.ivan_naumenko.repository_analyzer.llm.context.config.ContextProperties;
 import com.ivan_naumenko.repository_analyzer.llm.context.model.CompactCommitContext;
 import com.ivan_naumenko.repository_analyzer.llm.context.model.CompactFileContext;
+import com.ivan_naumenko.repository_analyzer.llm.context.model.CompactJavaFileContext;
 import com.ivan_naumenko.repository_analyzer.llm.context.model.CompactJavaTypeContext;
 import org.junit.jupiter.api.Test;
 
@@ -65,12 +66,7 @@ class CompactContextServiceTest {
         assertEquals(0, result.omittedFileCount());
         assertEquals(2, result.files().size());
 
-        CompactFileContext compactReadme = result.files().get(0);
-        assertEquals("README.md", compactReadme.path());
-        assertNull(compactReadme.javaAnalysis());
-        assertFalse(compactReadme.patchTruncated());
-
-        CompactFileContext compactJavaFile = result.files().get(1);
+        CompactFileContext compactJavaFile = result.files().get(0);
         assertEquals(JAVA_PATH, compactJavaFile.path());
         assertEquals("example", compactJavaFile.javaAnalysis().packageName());
         assertEquals(
@@ -90,6 +86,11 @@ class CompactContextServiceTest {
                         .getFirst()
                         .name()
         );
+
+        CompactFileContext compactReadme = result.files().get(1);
+        assertEquals("README.md", compactReadme.path());
+        assertNull(compactReadme.javaAnalysis());
+        assertFalse(compactReadme.patchTruncated());
     }
 
     @Test
@@ -104,7 +105,7 @@ class CompactContextServiceTest {
                 "123456789"
         );
         ChangedFile secondFile = changedFile(
-                "application.properties",
+                "notes.txt",
                 FileChangeType.MODIFY,
                 false,
                 1,
@@ -135,6 +136,104 @@ class CompactContextServiceTest {
         assertEquals(1, type.methods().size());
         assertEquals("first", type.methods().getFirst().name());
         assertEquals(1, type.omittedMethodCount());
+    }
+
+    @Test
+    void sharesTotalPatchBudgetAcrossAllIncludedFiles() {
+        CompactContextService service = new CompactContextService(
+                new ContextProperties(2, 10, 12, 10, 5, 5, 5)
+        );
+        List<ChangedFile> files = List.of(
+                changedFile(
+                        "first.txt",
+                        FileChangeType.MODIFY,
+                        false,
+                        1,
+                        0,
+                        "1234567890"
+                ),
+                changedFile(
+                        "second.txt",
+                        FileChangeType.MODIFY,
+                        false,
+                        1,
+                        0,
+                        "abcdefghij"
+                )
+        );
+
+        CompactCommitContext result = service.build(
+                commit(COMMIT_HASH),
+                diff(files),
+                List.of()
+        );
+
+        assertEquals(12, result.files().stream()
+                .mapToInt(file -> file.patch().length())
+                .sum());
+        assertEquals("123456", result.files().get(0).patch());
+        assertEquals("abcdef", result.files().get(1).patch());
+        assertTrue(result.files().stream().allMatch(
+                CompactFileContext::patchTruncated
+        ));
+    }
+
+    @Test
+    void limitsJavaStructureAndReportsOmittedElements() {
+        CompactContextService service = new CompactContextService(
+                new ContextProperties(1, 100, 100, 1, 1, 1, 1)
+        );
+        JavaTypeAnalysis firstType = new JavaTypeAnalysis(
+                "First",
+                JavaTypeKind.CLASS,
+                List.of("public"),
+                List.of(),
+                List.of(method("first"), method("second")),
+                0
+        );
+        JavaTypeAnalysis secondType = new JavaTypeAnalysis(
+                "Second",
+                JavaTypeKind.CLASS,
+                List.of(),
+                List.of(),
+                List.of(),
+                0
+        );
+        JavaFileAnalysis analysis = new JavaFileAnalysis(
+                JAVA_PATH,
+                "example",
+                List.of("first.Import", "second.Import"),
+                List.of(firstType, secondType),
+                20,
+                false,
+                List.of("first problem", "second problem")
+        );
+        ChangedFile javaFile = changedFile(
+                JAVA_PATH,
+                FileChangeType.MODIFY,
+                true,
+                1,
+                0,
+                "class First {}"
+        );
+
+        CompactJavaFileContext result = service.build(
+                        commit(COMMIT_HASH),
+                        diff(List.of(javaFile)),
+                        List.of(new ChangedJavaFileAnalysis(0, analysis))
+                )
+                .files()
+                .getFirst()
+                .javaAnalysis();
+
+        assertEquals(List.of("first.Import"), result.imports());
+        assertEquals(1, result.omittedImportCount());
+        assertEquals(List.of("first problem"), result.parsingProblems());
+        assertEquals(1, result.omittedParsingProblemCount());
+        assertEquals(1, result.types().size());
+        assertEquals(1, result.omittedTypeCount());
+        assertEquals(1, result.types().getFirst().methods().size());
+        assertEquals(1, result.types().getFirst().omittedMethodCount());
     }
 
     @Test
@@ -206,6 +305,10 @@ class CompactContextServiceTest {
         return new CompactContextService(new ContextProperties(
                 maxFiles,
                 maxPatchCharacters,
+                maxFiles * maxPatchCharacters,
+                50,
+                10,
+                10,
                 maxMethods
         ));
     }

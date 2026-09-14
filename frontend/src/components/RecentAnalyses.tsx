@@ -1,5 +1,5 @@
 import { ArrowUpRight, History, RotateCcw, Trash2 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { FlowHoverButton } from "@/components/ui/flow-hover-button";
 import { taskStatusLabel } from "@/lib/labels";
 import type { AnalysisTask } from "@/lib/types";
@@ -22,6 +22,7 @@ export function RecentAnalyses({
   onRestore,
   tasks,
 }: RecentAnalysesProps) {
+  const reduceMotion = useReducedMotion();
   const visibleTasks = tasks;
 
   return (
@@ -49,14 +50,21 @@ export function RecentAnalyses({
             animate={{ opacity: 1, height: "auto" }}
             className="max-h-44 space-y-1.5 overflow-y-auto pr-1 lg:min-h-0 lg:max-h-none lg:flex-1"
             exit={{ opacity: 0, height: 0 }}
-            initial={{ opacity: 0, height: 0 }}
+            initial={reduceMotion ? false : { opacity: 0, height: 0 }}
             key="history-list"
+            transition={reduceMotion ? { duration: 0 } : undefined}
           >
-            {visibleTasks.map((item) => (
-              <button
+            {visibleTasks.map((item, index) => (
+              <motion.button
+                animate={{ opacity: 1, x: 0 }}
                 className="group flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-panel"
+                initial={reduceMotion ? false : { opacity: 0, x: -8 }}
                 key={item.id}
                 onClick={() => onOpen(item)}
+                transition={{
+                  delay: reduceMotion ? 0 : Math.min(index * 0.035, 0.25),
+                  duration: reduceMotion ? 0 : 0.28,
+                }}
                 type="button"
               >
                 <span className="min-w-0">
@@ -68,15 +76,16 @@ export function RecentAnalyses({
                   </span>
                 </span>
                 <ArrowUpRight className="size-3.5 shrink-0 text-muted opacity-0 transition-opacity group-hover:opacity-100" />
-              </button>
+              </motion.button>
             ))}
           </motion.div>
         ) : (
           <motion.div
             animate={{ opacity: 1, y: 0 }}
             className="rounded-xl border border-line bg-panel/45 p-3"
-            initial={{ opacity: 0, y: -4 }}
+            initial={reduceMotion ? false : { opacity: 0, y: -4 }}
             key="empty-history"
+            transition={reduceMotion ? { duration: 0 } : undefined}
           >
             <p className="text-xs leading-5 text-muted">
               {hasHiddenTasks

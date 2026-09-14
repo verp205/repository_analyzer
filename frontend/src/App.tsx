@@ -5,10 +5,11 @@ import {
   GitFork,
   Moon,
   RotateCcw,
+  Square,
   Sparkles,
   Sun,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   type MouseEvent as ReactMouseEvent,
   useCallback,
@@ -19,6 +20,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { AnalysisTimeline } from "@/components/AnalysisTimeline";
+import { GitCredentialsFields } from "@/components/GitCredentialsFields";
 import { HelpAccordion } from "@/components/HelpAccordion";
 import { InsightsPanel } from "@/components/InsightsPanel";
 import { RecentAnalyses } from "@/components/RecentAnalyses";
@@ -27,16 +29,25 @@ import {
   type AnalysisRequest,
 } from "@/components/RepositoryForm";
 import { ReportPanel } from "@/components/ReportPanel";
+import { ReportPeriodPicker } from "@/components/report/ReportPeriodPicker";
+import { AudienceSelect } from "@/components/ui/audience-select";
 import { FlowHoverButton } from "@/components/ui/flow-hover-button";
 import { api } from "@/lib/api";
+import { ALL_TIME_PERIOD, periodKey } from "@/lib/reportPeriod";
 import type {
   AnalysisProgress,
   AnalysisReport,
   AnalysisTask,
+  AnalysisTaskStatus,
   CommitClusters,
   CommitGraph,
+  CommitInsight,
+  GitTag,
   ReportAudience,
   ReportEvent,
+  ReportPeriod,
+  ReportStatus,
+  RepositoryFacts,
 } from "@/lib/types";
 import { repositoryName } from "@/lib/utils";
 
@@ -51,6 +62,26 @@ type ThemeRipple = {
 };
 
 const hiddenHistoryKey = "repository-analyzer-hidden-history";
+const terminalReportStatuses: ReportStatus[] = [
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+];
+const reportEventNames = [
+  "snapshot",
+  "started",
+  "progress",
+  "synthesis",
+  "completed",
+  "failed",
+  "cancelled",
+];
+const cancellableTaskStatuses: AnalysisTaskStatus[] = [
+  "NEW",
+  "CLONING",
+  "DISCOVERING_COMMITS",
+  "PROCESSING",
+];
 
 interface ThemeViewTransition {
   ready: Promise<void>;
@@ -84,7 +115,10 @@ function initialHiddenTaskIds() {
 }
 
 export default function App() {
+  const reduceMotion = useReducedMotion();
   const [theme, setTheme] = useState<Theme>(initialTheme);
+  const [retryGitUsername, setRetryGitUsername] = useState("");
+  const [retryGitAccessToken, setRetryGitAccessToken] = useState("");
   const [themeRipple, setThemeRipple] = useState<ThemeRipple | null>(null);
   const [tasks, setTasks] = useState<AnalysisTask[]>([]);
   const [hiddenTaskIds, setHiddenTaskIds] =
@@ -94,14 +128,19 @@ export default function App() {
   const [graph, setGraph] = useState<CommitGraph | null>(null);
   const [clusters, setClusters] = useState<CommitClusters | null>(null);
   const [report, setReport] = useState<AnalysisReport | null>(null);
-  const [liveContent, setLiveContent] = useState("");
+  const [facts, setFacts] = useState<RepositoryFacts | null>(null);
+  const [commitInsights, setCommitInsights] = useState<CommitInsight[]>([]);
   const [audience, setAudience] = useState<ReportAudience>("DEVELOPER");
+  const [period, setPeriod] = useState<ReportPeriod>(ALL_TIME_PERIOD);
+  const [tags, setTags] = useState<GitTag[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancellingReport, setCancellingReport] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>("checking");
   const reportRequestKey = useRef("");
-  const lastLiveCommit = useRef(0);
+  const restartingRecoveredReportId = useRef<number | null>(null);
   const taskId = task?.id ?? null;
   const taskStatus = task?.status ?? null;
   const reportId = report?.id ?? null;
@@ -161,7 +200,16 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!taskId || taskStatus === "COMPLETED" || taskStatus === "FAILED") {
+    const cancellationSettled =
+      taskStatus === "CANCELLED" &&
+      (progress?.processingCommits ?? 0) === 0;
+
+    if (
+      !taskId ||
+      taskStatus === "COMPLETED" ||
+      taskStatus === "FAILED" ||
+      cancellationSettled
+    ) {
       return;
     }
 
@@ -175,7 +223,12 @@ export default function App() {
         if (disposed) return;
         setTask(freshTask);
         setProgress(freshProgress);
-        if (freshTask.status === "COMPLETED" || freshTask.status === "FAILED") {
+        if (
+          freshTask.status === "COMPLETED" ||
+          freshTask.status === "FAILED" ||
+          (freshTask.status === "CANCELLED" &&
+            freshProgress.processingCommits === 0)
+        ) {
           clearInterval(timer);
           void refreshTasks();
         }
@@ -190,11 +243,11 @@ export default function App() {
       disposed = true;
       clearInterval(timer);
     };
-  }, [taskId, taskStatus, refreshTasks]);
+  }, [taskId, taskStatus, progress?.processingCommits, refreshTasks]);
 
   useEffect(() => {
     if (!taskId || taskStatus !== "COMPLETED") return;
-    const key = `${taskId}:${audience}`;
+    const key = `${taskId}:${audience}:${periodKey(period)}`;
     if (reportRequestKey.current === key) return;
     reportRequestKey.current = key;
 
@@ -204,14 +257,19 @@ export default function App() {
         const [nextGraph, nextClusters, nextReport] = await Promise.all([
           api.getGraph(taskId),
           api.getClusters(taskId),
-          api.createReport(taskId, audience),
+          api.createReport(taskId, audience, period),
+        ]);
+        // Показатели и коммиты — в границах периода отчёта.
+        const [nextFacts, nextInsights] = await Promise.all([
+          api.getReportFacts(nextReport.id),
+          api.getReportCommitInsights(nextReport.id),
         ]);
         if (disposed) return;
         setGraph(nextGraph);
         setClusters(nextClusters);
+        setFacts(nextFacts);
+        setCommitInsights(nextInsights);
         setReport(nextReport);
-        setLiveContent(nextReport.content || "");
-        lastLiveCommit.current = nextReport.processedCommits;
       } catch (caught) {
         if (!disposed) {
           reportRequestKey.current = "";
@@ -224,26 +282,85 @@ export default function App() {
     return () => {
       disposed = true;
     };
-  }, [taskId, taskStatus, audience]);
+  }, [taskId, taskStatus, audience, period]);
+
+  useEffect(() => {
+    if (!taskId || taskStatus !== "COMPLETED") return;
+    let disposed = false;
+    void api
+      .getTags(taskId)
+      .then((nextTags) => {
+        if (!disposed) setTags(nextTags);
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+    };
+  }, [taskId, taskStatus]);
 
   const refreshReport = useCallback(async (reportId: number) => {
     const fresh = await api.getReport(reportId);
     setReport(fresh);
-    if (fresh.content) setLiveContent(fresh.content);
-    lastLiveCommit.current = fresh.processedCommits;
+    if (terminalReportStatuses.includes(fresh.status)) {
+      const [nextFacts, nextInsights] = await Promise.all([
+        api.getReportFacts(fresh.id),
+        api.getReportCommitInsights(fresh.id),
+      ]);
+      setFacts(nextFacts);
+      setCommitInsights(nextInsights);
+    }
     return fresh;
   }, []);
 
   useEffect(() => {
-    if (!reportId || reportStatus === "COMPLETED" || reportStatus === "FAILED") {
+    if (
+      !report ||
+      report.status !== "NEW" ||
+      taskStatus !== "COMPLETED" ||
+      restartingRecoveredReportId.current === report.id
+    ) {
+      return;
+    }
+
+    restartingRecoveredReportId.current = report.id;
+    let disposed = false;
+    void api
+      .createReport(report.analysisTaskId, report.audience, report.period)
+      .then((restarted) => {
+        if (disposed) return;
+        if (restarted.status !== "NEW") {
+          restartingRecoveredReportId.current = null;
+        }
+        setReport(restarted);
+      })
+      .catch((caught) => {
+        if (disposed) return;
+        restartingRecoveredReportId.current = null;
+        setError(errorMessage(caught));
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [report, taskStatus]);
+
+  useEffect(() => {
+    if (
+      !reportId ||
+      reportStatus === "COMPLETED" ||
+      reportStatus === "FAILED" ||
+      reportStatus === "CANCELLED"
+    ) {
       return;
     }
 
     const source = new EventSource(api.reportEventsUrl(reportId));
+    let fallbackTimer: ReturnType<typeof setInterval> | null = null;
+
     const handleEvent = (message: MessageEvent<string>) => {
       const event = JSON.parse(message.data) as ReportEvent;
       setReport((current) =>
-        current
+        current && current.id === event.reportId
           ? {
               ...current,
               processedCommits: event.processedCommits,
@@ -252,33 +369,36 @@ export default function App() {
           : current,
       );
 
-      if (event.type === "SUMMARY" && event.contentChunk) {
-        setLiveContent(event.contentChunk);
-        lastLiveCommit.current = 0;
+      if (event.commits?.length) {
+        setCommitInsights((current) => mergeInsights(current, event.commits));
       }
-      if (
-        event.type === "PROGRESS" &&
-        event.contentChunk &&
-        event.processedCommits > lastLiveCommit.current
-      ) {
-        setLiveContent((current) => current + event.contentChunk);
-        lastLiveCommit.current = event.processedCommits;
-      }
-      if (event.type === "COMPLETED" || event.type === "FAILED") {
-        void refreshReport(event.reportId);
+      if (event.type === "SNAPSHOT") {
+        // После (пере)подключения догружаем то, что могло прийти без нас.
+        void refreshReport(event.reportId).catch(() => undefined);
+        void api
+          .getReportCommitInsights(event.reportId)
+          .then(setCommitInsights)
+          .catch(() => undefined);
+      } else if (event.status && terminalReportStatuses.includes(event.status)) {
+        void refreshReport(event.reportId).catch(() => undefined);
       }
     };
 
-    ["snapshot", "summary", "progress", "completed", "failed"].forEach(
-      (eventName) => source.addEventListener(eventName, handleEvent),
+    reportEventNames.forEach((eventName) =>
+      source.addEventListener(eventName, handleEvent),
     );
 
-    const timer = setInterval(() => {
-      void refreshReport(reportId).catch(() => undefined);
-    }, 1500);
+    // Опрос нужен только если SSE-соединение закрыто окончательно.
+    source.onerror = () => {
+      if (source.readyState === EventSource.CLOSED && !fallbackTimer) {
+        fallbackTimer = setInterval(() => {
+          void refreshReport(reportId).catch(() => undefined);
+        }, 4000);
+      }
+    };
 
     return () => {
-      clearInterval(timer);
+      if (fallbackTimer) clearInterval(fallbackTimer);
       source.close();
     };
   }, [reportId, reportStatus, refreshReport]);
@@ -287,18 +407,22 @@ export default function App() {
     setSubmitting(true);
     setError(null);
     setAudience(request.audience);
+    setPeriod(ALL_TIME_PERIOD);
+    setTags([]);
     setProgress(null);
     setGraph(null);
     setClusters(null);
     setReport(null);
-    setLiveContent("");
+    setFacts(null);
+    setCommitInsights([]);
     reportRequestKey.current = "";
-    lastLiveCommit.current = 0;
 
     try {
       const created = await api.createTask(
         request.repositoryUrl,
         request.branch,
+        request.gitUsername,
+        request.gitAccessToken,
       );
       setTask(created);
       setHiddenTaskIds((current) => current.filter((id) => id !== created.id));
@@ -314,14 +438,39 @@ export default function App() {
     if (!task) return;
     setError(null);
     try {
-      const retried = await api.retryTask(task.id);
+      const retried = await api.retryTask(
+        task.id,
+        retryGitUsername.trim() || undefined,
+        retryGitAccessToken || undefined,
+      );
+      setRetryGitAccessToken("");
       setTask(retried);
       setGraph(null);
       setClusters(null);
       setReport(null);
+      setFacts(null);
+      setCommitInsights([]);
       reportRequestKey.current = "";
     } catch (caught) {
       setError(errorMessage(caught));
+    }
+  }
+
+  async function cancelTask() {
+    if (!task) return;
+    setCancelling(true);
+    setError(null);
+
+    try {
+      const cancelled = await api.cancelTask(task.id);
+      setTask(cancelled);
+      setReport(null);
+      reportRequestKey.current = "";
+      void refreshTasks();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setCancelling(false);
     }
   }
 
@@ -331,20 +480,35 @@ export default function App() {
     try {
       const retried = await api.retryReport(report.id);
       setReport(retried);
-      setLiveContent("");
-      lastLiveCommit.current = 0;
     } catch (caught) {
       setError(errorMessage(caught));
     }
   }
 
+  async function cancelReport() {
+    if (!report || report.status !== "PROCESSING") return;
+    setCancellingReport(true);
+    setError(null);
+    try {
+      const cancelled = await api.cancelReport(report.id);
+      setReport(cancelled);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setCancellingReport(false);
+    }
+  }
+
   async function openTask(selected: AnalysisTask) {
     setTask(selected);
+    setPeriod(ALL_TIME_PERIOD);
+    setTags([]);
     setProgress(null);
     setGraph(null);
     setClusters(null);
     setReport(null);
-    setLiveContent("");
+    setFacts(null);
+    setCommitInsights([]);
     setError(null);
     reportRequestKey.current = "";
     try {
@@ -354,15 +518,26 @@ export default function App() {
     }
   }
 
+  function selectReportAudience(nextAudience: ReportAudience) {
+    if (nextAudience === audience) return;
+    setAudience(nextAudience);
+    setReport(null);
+    reportRequestKey.current = "";
+  }
+
+  function selectReportPeriod(nextPeriod: ReportPeriod) {
+    if (periodKey(nextPeriod) === periodKey(period)) return;
+    setPeriod(nextPeriod);
+    setReport(null);
+    setError(null);
+    reportRequestKey.current = "";
+  }
+
   function toggleTheme(event: ReactMouseEvent<HTMLButtonElement>) {
     if (themeRipple) return;
     const nextTheme = theme === "light" ? "dark" : "light";
     const startViewTransition = (document as ViewTransitionDocument)
       .startViewTransition;
-    const reduceMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
-
     if (reduceMotion) {
       setTheme(nextTheme);
       return;
@@ -420,7 +595,7 @@ export default function App() {
 
   return (
     <div className="tech-canvas min-h-screen text-ink">
-      <AnimatePresence>
+      <AnimatePresence initial={!reduceMotion}>
         {themeRipple && (
           <motion.div
             animate={{ opacity: 1, scale: 1 }}
@@ -440,12 +615,25 @@ export default function App() {
               top: themeRipple.y - themeRipple.radius,
               width: themeRipple.radius * 2,
             }}
-            transition={{ duration: 0.68, ease: [0.22, 1, 0.36, 1] }}
+            transition={
+              reduceMotion
+                ? { duration: 0 }
+                : { duration: 0.68, ease: [0.22, 1, 0.36, 1] }
+            }
           />
         )}
       </AnimatePresence>
       <div className="mx-auto grid min-h-screen max-w-[1680px] lg:grid-cols-[310px_minmax(0,1fr)]">
-        <aside className="flex flex-col border-b border-line bg-sidebar px-6 py-6 lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r lg:px-7 lg:py-8">
+        <motion.aside
+          animate={{ opacity: 1, x: 0 }}
+          className="flex flex-col border-b border-line bg-sidebar px-6 py-6 lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r lg:px-7 lg:py-8"
+          initial={reduceMotion ? false : { opacity: 0, x: -24 }}
+          transition={
+            reduceMotion
+              ? { duration: 0 }
+              : { duration: 0.55, ease: [0.22, 1, 0.36, 1] }
+          }
+        >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <span className="relative flex size-10 items-center justify-center rounded-2xl border border-line bg-panel shadow-soft">
@@ -497,16 +685,28 @@ export default function App() {
               © 2026 Иван Науменко
             </p>
           </div>
-        </aside>
+        </motion.aside>
 
-        <main className="relative overflow-hidden px-4 py-5 sm:px-7 sm:py-7 xl:px-12 xl:py-10">
-          <div className="ambient-glow" />
+        <motion.main
+          animate={{ opacity: 1 }}
+          className="relative overflow-x-clip px-4 py-5 sm:px-7 sm:py-7 xl:px-12 xl:py-10"
+          initial={reduceMotion ? false : { opacity: 0 }}
+          transition={{ duration: reduceMotion ? 0 : 0.5 }}
+        >
           <div className="relative mx-auto max-w-[1180px]">
-            <header className="mb-8 flex items-center justify-between gap-4">
+            <motion.header
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-8 flex items-center justify-between gap-4"
+              initial={reduceMotion ? false : { opacity: 0, y: -10 }}
+              transition={{
+                delay: reduceMotion ? 0 : 0.14,
+                duration: reduceMotion ? 0 : 0.4,
+              }}
+            >
               <div className="flex items-center gap-2 text-xs font-medium text-muted">
                 <span className="relative flex size-2">
                   {connectionStatus === "online" && (
-                    <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-40" />
+                    <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-40 motion-reduce:animate-none" />
                   )}
                   <span
                     className={`relative inline-flex size-2 rounded-full ${
@@ -529,15 +729,30 @@ export default function App() {
                   задача/{task.id} · {task.branch}
                 </span>
               )}
-            </header>
+            </motion.header>
 
-            <section className="hero-card">
+            <motion.section
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              className="hero-card"
+              initial={
+                reduceMotion ? false : { opacity: 0, scale: 0.985, y: 16 }
+              }
+              transition={
+                reduceMotion
+                  ? { duration: 0 }
+                  : {
+                      delay: 0.08,
+                      duration: 0.62,
+                      ease: [0.22, 1, 0.36, 1],
+                    }
+              }
+            >
               <div aria-hidden="true" className="glass-orb" />
               <div className="relative z-10 w-full">
                 <p className="eyebrow mb-4">Новый анализ</p>
                 <RepositoryForm loading={submitting} onSubmit={startAnalysis} />
               </div>
-            </section>
+            </motion.section>
 
             <div className="soft-panel mt-4 px-5 pb-5 lg:hidden">
               <RecentAnalyses
@@ -553,13 +768,14 @@ export default function App() {
               />
             </div>
 
-            <AnimatePresence>
+            <AnimatePresence initial={!reduceMotion}>
               {error && (
                 <motion.div
                   animate={{ opacity: 1, y: 0 }}
                   className="mt-4 flex items-start gap-3 rounded-2xl border border-red-300/60 bg-red-50/80 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300"
                   exit={{ opacity: 0, y: -5 }}
-                  initial={{ opacity: 0, y: -5 }}
+                  initial={reduceMotion ? false : { opacity: 0, y: -5 }}
+                  transition={reduceMotion ? { duration: 0 } : undefined}
                 >
                   <AlertCircle className="mt-0.5 size-4 shrink-0" />
                   <span className="flex-1">{error}</span>
@@ -574,7 +790,8 @@ export default function App() {
               <motion.div
                 animate={{ opacity: 1, y: 0 }}
                 className="mt-5 space-y-4"
-                initial={{ opacity: 0, y: 12 }}
+                initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+                transition={reduceMotion ? { duration: 0 } : undefined}
               >
                 <div className="grid gap-4">
                   <section className="soft-panel p-5 sm:p-6">
@@ -588,6 +805,30 @@ export default function App() {
                           <p className="mt-1 break-all font-mono text-xs text-muted">
                             {task.repositoryUrl}
                           </p>
+                          {task.status === "COMPLETED" && (
+                            <div className="mt-4 w-full max-w-sm">
+                              <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">
+                                Версия отчёта
+                              </p>
+                              <AudienceSelect
+                                onChange={selectReportAudience}
+                                placement="bottom"
+                                value={audience}
+                              />
+                              <p className="mb-2 mt-4 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">
+                                Период
+                              </p>
+                              <ReportPeriodPicker
+                                key={task.id}
+                                onChange={selectReportPeriod}
+                                tags={tags}
+                                value={period}
+                              />
+                              <p className="mt-2 text-[10px] leading-4 text-muted">
+                                Для каждой роли и периода создаётся отдельный отчёт.
+                              </p>
+                            </div>
+                          )}
                         </div>
                         {task.status === "COMPLETED" && (
                           <span className="flex items-center gap-1.5 rounded-full bg-success-soft px-3 py-1.5 text-xs font-medium text-success">
@@ -613,15 +854,55 @@ export default function App() {
                       )}
                     </div>
 
-                    {task.status === "FAILED" && (
+                    {cancellableTaskStatuses.includes(task.status) && (
                       <FlowHoverButton
-                        className="mt-6 self-start"
-                        icon={<RotateCcw className="size-4" />}
-                        onClick={() => void retryTask()}
+                        className="mt-6 self-start border-red-300 text-red-700 before:bg-red-700 hover:text-white dark:border-red-900/70 dark:text-red-300 dark:before:bg-red-300 dark:hover:text-red-950"
+                        disabled={cancelling}
+                        icon={<Square className="size-3.5 fill-current" />}
+                        onClick={() => void cancelTask()}
                         type="button"
                       >
-                        Повторить анализ
+                        {cancelling ? "Останавливаем…" : "Остановить анализ"}
                       </FlowHoverButton>
+                    )}
+
+                    {(task.status === "FAILED" ||
+                      task.status === "CANCELLED") && (
+                      <div className="mt-6 max-w-2xl space-y-3">
+                        {task.status === "CANCELLED" && (
+                          <p className="text-xs leading-5 text-muted">
+                            Новые коммиты больше не запускаются. Возобновление
+                            станет доступно после завершения уже начатых
+                            операций.
+                          </p>
+                        )}
+                        <GitCredentialsFields
+                          accessToken={retryGitAccessToken}
+                          disabled={
+                            task.status === "CANCELLED" &&
+                            (progress?.processingCommits ?? 0) > 0
+                          }
+                          onAccessTokenChange={setRetryGitAccessToken}
+                          onUsernameChange={setRetryGitUsername}
+                          username={retryGitUsername}
+                        />
+                        <FlowHoverButton
+                          className="self-start"
+                          disabled={
+                            task.status === "CANCELLED" &&
+                            (progress?.processingCommits ?? 0) > 0
+                          }
+                          icon={<RotateCcw className="size-4" />}
+                          onClick={() => void retryTask()}
+                          type="button"
+                        >
+                          {task.status === "CANCELLED"
+                            ? (progress?.processingCommits ?? 0) > 0
+                              ? "Завершаем текущие операции…"
+                              : "Возобновить анализ"
+                            : "Повторить анализ"}
+                        </FlowHoverButton>
+                      </div>
                     )}
                   </section>
 
@@ -638,7 +919,10 @@ export default function App() {
                 )}
 
                 <ReportPanel
-                  liveContent={liveContent}
+                  cancelling={cancellingReport}
+                  commits={commitInsights}
+                  facts={facts}
+                  onCancel={cancelReport}
                   onRetry={retryReport}
                   report={report}
                 />
@@ -651,14 +935,24 @@ export default function App() {
                   [BookOpenText, "Технический контекст", "Diff и структура Java-кода до обращения к LLM"],
                   [GitFork, "Настоящая история", "Родители, ветки и смысловые группы изменений"],
                   [Sparkles, "Ролевые отчёты", "Пять вариантов отчёта для пяти точек зрения"],
-                ].map(([Icon, title, description]) => {
+                ].map(([Icon, title, description], index) => {
                   const FeatureIcon = Icon as typeof BookOpenText;
                   return (
-                    <div className="tech-card rounded-2xl border border-line/80 bg-panel/45 p-4" key={String(title)}>
-                      <FeatureIcon className="mb-3 size-4 text-accent" />
+                    <motion.div
+                      animate={{ opacity: 1, y: 0 }}
+                      className="tech-card rounded-2xl border border-line/80 bg-panel/45 p-4"
+                      initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+                      key={String(title)}
+                      transition={{
+                        delay: reduceMotion ? 0 : 0.2 + index * 0.07,
+                        duration: reduceMotion ? 0 : 0.4,
+                        ease: [0.22, 1, 0.36, 1],
+                      }}
+                    >
+                      <FeatureIcon className="mb-3 size-4 text-accent opacity-65" />
                       <p className="text-sm font-semibold text-ink">{String(title)}</p>
                       <p className="mt-1 text-xs leading-5 text-muted">{String(description)}</p>
-                    </div>
+                    </motion.div>
                   );
                 })}
               </div>
@@ -675,7 +969,7 @@ export default function App() {
               </p>
             </div>
           </div>
-        </main>
+        </motion.main>
       </div>
     </div>
   );
@@ -683,4 +977,10 @@ export default function App() {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Произошла непредвиденная ошибка";
+}
+
+function mergeInsights(current: CommitInsight[], incoming: CommitInsight[]) {
+  const byCommit = new Map(current.map((item) => [item.commitId, item]));
+  incoming.forEach((item) => byCommit.set(item.commitId, item));
+  return [...byCommit.values()].sort((left, right) => left.position - right.position);
 }

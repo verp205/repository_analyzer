@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ChevronDown, CircleHelp } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 const helpItems = [
   {
     title: "Начало работы",
-    body: "Вставьте ссылку на публичный Git-репозиторий, проверьте название ветки и выберите, для кого подготовить отчёт. Остальное анализатор выполнит в фоновом режиме.",
+    body: "Вставьте HTTPS-ссылку на публичный или приватный Git-репозиторий, проверьте название ветки и выберите, для кого подготовить отчёт. Для приватного репозитория раскройте поле доступа и укажите персональный токен.",
   },
   {
     title: "Что будет проанализировано?",
@@ -23,6 +23,7 @@ const helpItems = [
 ];
 
 export function HelpAccordion() {
+  const reduceMotion = useReducedMotion();
   const [openItem, setOpenItem] = useState(0);
 
   return (
@@ -55,8 +56,11 @@ export function HelpAccordion() {
                   <motion.div
                     animate={{ height: "auto", opacity: 1 }}
                     exit={{ height: 0, opacity: 0 }}
-                    initial={{ height: 0, opacity: 0 }}
+                    initial={
+                      reduceMotion ? false : { height: 0, opacity: 0 }
+                    }
                     className="overflow-hidden"
+                    transition={reduceMotion ? { duration: 0 } : undefined}
                   >
                     <p className="pb-4 pr-5 text-sm leading-6 text-muted">
                       {item.body}

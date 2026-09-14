@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
@@ -32,6 +32,7 @@ const graphPadding = 24;
 const laneColors = ["#aeb4bd", "#818cf8", "#67a38a", "#c18a6c", "#b58ac4"];
 
 export function CommitGraphTree({ graph }: CommitGraphTreeProps) {
+  const reduceMotion = useReducedMotion();
   const layout = useMemo(() => buildLayout(graph), [graph]);
   const [activeTooltip, setActiveTooltip] =
     useState<ActiveNodeTooltip | null>(null);
@@ -89,6 +90,7 @@ export function CommitGraphTree({ graph }: CommitGraphTreeProps) {
                   laneColors[edge.parentPosition % laneColors.length];
                 return (
                   <path
+                    className="commit-graph-edge"
                     d={`M ${edge.parentX} ${edge.parentY} C ${edge.parentX + distance} ${edge.parentY}, ${edge.childX - distance} ${edge.childY}, ${edge.childX} ${edge.childY}`}
                     data-child-hash={edge.childHash}
                     data-commit-edge={`${edge.parentHash}:${edge.childHash}:${edge.parentPosition}`}
@@ -119,7 +121,7 @@ export function CommitGraphTree({ graph }: CommitGraphTreeProps) {
               return (
                 <g
                   aria-label={nodeAriaLabel(node)}
-                  className="cursor-help outline-none"
+                  className="commit-graph-node cursor-help outline-none"
                   data-commit-node={node.commitHash}
                   key={node.commitHash}
                   onBlur={() => setActiveTooltip(null)}
@@ -183,6 +185,7 @@ export function CommitGraphTree({ graph }: CommitGraphTreeProps) {
                 anchorY={activeTooltip.anchorY}
                 key={activeTooltip.node.commitHash}
                 node={activeTooltip.node}
+                reduceMotion={Boolean(reduceMotion)}
               />
             )}
           </AnimatePresence>,
@@ -209,10 +212,12 @@ function CommitNodeTooltip({
   anchorX,
   anchorY,
   node,
+  reduceMotion,
 }: {
   anchorX: number;
   anchorY: number;
   node: PositionedNode;
+  reduceMotion: boolean;
 }) {
   const roles = nodeRoles(node);
   const tooltipWidth = 288;
@@ -232,10 +237,10 @@ function CommitNodeTooltip({
       className="pointer-events-none fixed z-[80] w-72 rounded-xl border border-line bg-panel/95 p-3 text-left shadow-[0_18px_45px_rgba(0,0,0,0.35)] backdrop-blur-xl"
       data-commit-tooltip={node.commitHash}
       exit={{ opacity: 0, scale: 0.97, y: -3 }}
-      initial={{ opacity: 0, scale: 0.97, y: 3 }}
+      initial={reduceMotion ? false : { opacity: 0, scale: 0.97, y: 3 }}
       role="tooltip"
       style={{ left, top }}
-      transition={{ duration: 0.14 }}
+      transition={{ duration: reduceMotion ? 0 : 0.14 }}
     >
       <div className="flex items-start justify-between gap-3">
         <span className="font-mono text-[11px] font-semibold text-ink">

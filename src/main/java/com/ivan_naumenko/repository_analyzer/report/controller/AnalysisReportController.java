@@ -1,11 +1,14 @@
 package com.ivan_naumenko.repository_analyzer.report.controller;
 
+import com.ivan_naumenko.repository_analyzer.commitinsight.dto.CommitInsightResponse;
 import com.ivan_naumenko.repository_analyzer.report.dto.AnalysisReportResponse;
 import com.ivan_naumenko.repository_analyzer.report.dto.CreateReportRequest;
+import com.ivan_naumenko.repository_analyzer.report.facts.dto.RepositoryFactsResponse;
 import com.ivan_naumenko.repository_analyzer.report.model.AnalysisReport;
 import com.ivan_naumenko.repository_analyzer.report.model.ReportStatus;
 import com.ivan_naumenko.repository_analyzer.report.orchestrator.ReportOrchestrator;
 import com.ivan_naumenko.repository_analyzer.report.service.AnalysisReportService;
+import com.ivan_naumenko.repository_analyzer.report.service.ReportScopeService;
 import com.ivan_naumenko.repository_analyzer.report.sse.ReportEventService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +33,7 @@ public class AnalysisReportController {
     private final AnalysisReportService reportService;
     private final ReportOrchestrator orchestrator;
     private final ReportEventService eventService;
+    private final ReportScopeService scopeService;
 
     @GetMapping("/analysis-tasks/{taskId}/reports")
     public List<AnalysisReportResponse> getForTask(
@@ -45,7 +49,8 @@ public class AnalysisReportController {
     ) {
         AnalysisReport report = reportService.createOrGet(
                 taskId,
-                request.audience()
+                request.audience(),
+                request.toPeriod()
         );
         boolean started = orchestrator.start(report.getId());
         AnalysisReportResponse response = reportService.getResponse(
@@ -62,12 +67,37 @@ public class AnalysisReportController {
         return reportService.getResponse(reportId);
     }
 
+    @GetMapping("/reports/{reportId}/facts")
+    public RepositoryFactsResponse facts(@PathVariable Integer reportId) {
+        return scopeService.facts(reportId);
+    }
+
+    @GetMapping("/reports/{reportId}/commit-insights")
+    public List<CommitInsightResponse> commitInsights(
+            @PathVariable Integer reportId
+    ) {
+        return scopeService.commitInsights(reportId);
+    }
+
     @PostMapping("/reports/{reportId}/retry")
     public ResponseEntity<AnalysisReportResponse> retry(
             @PathVariable Integer reportId
     ) {
-        if (!reportService.resetFailed(reportId)
+        if (!reportService.resetForRetry(reportId)
                 || !orchestrator.start(reportId)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(reportService.getResponse(reportId));
+        }
+
+        return ResponseEntity.accepted()
+                .body(reportService.getResponse(reportId));
+    }
+
+    @PostMapping("/reports/{reportId}/cancel")
+    public ResponseEntity<AnalysisReportResponse> cancel(
+            @PathVariable Integer reportId
+    ) {
+        if (!orchestrator.cancel(reportId)) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body(reportService.getResponse(reportId));
         }
@@ -85,7 +115,8 @@ public class AnalysisReportController {
         SseEmitter emitter = eventService.subscribe(reportId);
         AnalysisReportResponse current = reportService.getResponse(reportId);
         boolean terminal = current.status() == ReportStatus.COMPLETED
-                || current.status() == ReportStatus.FAILED;
+                || current.status() == ReportStatus.FAILED
+                || current.status() == ReportStatus.CANCELLED;
         eventService.sendSnapshot(
                 reportId,
                 emitter,

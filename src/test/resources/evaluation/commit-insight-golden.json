@@ -1,0 +1,455 @@
+[
+  {
+    "id": "api-new-endpoint",
+    "description": "Новый REST-эндпоинт чтения заказа",
+    "expected": { "categories": ["API", "FEATURE"], "riskLevels": ["LOW", "MEDIUM"] },
+    "commit": {
+      "message": "Add endpoint to fetch order by id",
+      "files": [
+        {
+          "path": "src/main/java/shop/order/OrderController.java",
+          "changeType": "MODIFY",
+          "addedLines": 7,
+          "deletedLines": 0,
+          "patch": "@@ -20,6 +20,13 @@ public class OrderController {\n+    @GetMapping(\"/api/orders/{id}\")\n+    public ResponseEntity<OrderDto> getOrder(@PathVariable Long id) {\n+        return orderService.findById(id)\n+                .map(OrderDto::from)\n+                .map(ResponseEntity::ok)\n+                .orElse(ResponseEntity.notFound().build());\n+    }\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "fix-null-address",
+    "description": "Исправление NullPointerException",
+    "expected": { "categories": ["FIX"], "riskLevels": ["LOW", "MEDIUM"] },
+    "commit": {
+      "message": "Fix NPE when customer has no address",
+      "files": [
+        {
+          "path": "src/main/java/shop/shipping/ShippingService.java",
+          "changeType": "MODIFY",
+          "addedLines": 4,
+          "deletedLines": 1,
+          "patch": "@@ -41,7 +41,10 @@\n     public BigDecimal shippingCost(Customer customer) {\n-        String region = customer.getAddress().getRegion();\n+        if (customer.getAddress() == null) {\n+            return DEFAULT_SHIPPING_COST;\n+        }\n+        String region = customer.getAddress().getRegion();\n         return tariffs.costFor(region);\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "security-hardcoded-jwt-secret",
+    "description": "Секрет подписи JWT зашит в код",
+    "expected": { "categories": ["SECURITY", "FEATURE"], "riskLevels": ["HIGH"] },
+    "commit": {
+      "message": "Configure JWT signing",
+      "files": [
+        {
+          "path": "src/main/java/shop/security/JwtConfig.java",
+          "changeType": "ADD",
+          "addedLines": 10,
+          "deletedLines": 0,
+          "patch": "@@ -0,0 +1,10 @@\n+@Configuration\n+public class JwtConfig {\n+    private static final String SECRET = \"changeme-super-secret-key\";\n+\n+    @Bean\n+    public JwtEncoder jwtEncoder() {\n+        SecretKey key = new SecretKeySpec(SECRET.getBytes(), \"HmacSHA256\");\n+        return new NimbusJwtEncoder(new ImmutableSecret<>(key));\n+    }\n+}\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "security-csrf-disabled-permit-all",
+    "description": "Отключён CSRF и открыт доступ ко всем эндпоинтам",
+    "expected": { "categories": ["SECURITY"], "riskLevels": ["HIGH"] },
+    "commit": {
+      "message": "Simplify security config for frontend",
+      "files": [
+        {
+          "path": "src/main/java/shop/security/SecurityConfig.java",
+          "changeType": "MODIFY",
+          "addedLines": 2,
+          "deletedLines": 4,
+          "patch": "@@ -18,11 +18,9 @@\n     @Bean\n     SecurityFilterChain filterChain(HttpSecurity http) throws Exception {\n-        http.csrf(Customizer.withDefaults())\n-            .authorizeHttpRequests(auth -> auth\n-                .requestMatchers(\"/api/admin/**\").hasRole(\"ADMIN\")\n-                .anyRequest().authenticated());\n+        http.csrf(csrf -> csrf.disable())\n+            .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());\n         return http.build();\n     }\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "sql-injection-search",
+    "description": "Поиск через конкатенацию пользовательского ввода в SQL",
+    "expected": { "categories": ["SECURITY", "FEATURE", "DATA"], "riskLevels": ["HIGH"] },
+    "commit": {
+      "message": "Add search by customer name",
+      "files": [
+        {
+          "path": "src/main/java/shop/customer/CustomerRepositoryImpl.java",
+          "changeType": "MODIFY",
+          "addedLines": 4,
+          "deletedLines": 0,
+          "patch": "@@ -30,6 +30,10 @@\n+    public List<Customer> searchByName(String name) {\n+        String sql = \"SELECT * FROM customers WHERE name LIKE '%\" + name + \"%'\";\n+        return jdbcTemplate.query(sql, customerRowMapper);\n+    }\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "migration-drop-column",
+    "description": "Необратимое удаление столбца с данными",
+    "expected": { "categories": ["DATA"], "riskLevels": ["HIGH", "MEDIUM"] },
+    "commit": {
+      "message": "Remove phone column from users",
+      "files": [
+        {
+          "path": "src/main/resources/db/migration/V12__drop_user_phone.sql",
+          "changeType": "ADD",
+          "addedLines": 1,
+          "deletedLines": 0,
+          "patch": "@@ -0,0 +1 @@\n+ALTER TABLE users DROP COLUMN phone;\n"
+        },
+        {
+          "path": "src/main/java/shop/user/User.java",
+          "changeType": "MODIFY",
+          "addedLines": 0,
+          "deletedLines": 3,
+          "patch": "@@ -25,9 +25,6 @@\n-    @Column(name = \"phone\")\n-    private String phone;\n-\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "migration-add-index",
+    "description": "Индекс для ускорения выборки",
+    "expected": { "categories": ["DATA", "PERFORMANCE"], "riskLevels": ["LOW", "MEDIUM"] },
+    "commit": {
+      "message": "Add index on orders.created_at",
+      "files": [
+        {
+          "path": "src/main/resources/db/migration/V13__orders_created_at_index.sql",
+          "changeType": "ADD",
+          "addedLines": 1,
+          "deletedLines": 0,
+          "patch": "@@ -0,0 +1 @@\n+CREATE INDEX idx_orders_created_at ON orders(created_at);\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "refactor-extract-method",
+    "description": "Вынос логики в метод без изменения поведения",
+    "expected": { "categories": ["REFACTOR"], "riskLevels": ["NONE", "LOW"] },
+    "commit": {
+      "message": "Extract discount calculation into separate method",
+      "files": [
+        {
+          "path": "src/main/java/shop/pricing/PriceCalculator.java",
+          "changeType": "MODIFY",
+          "addedLines": 8,
+          "deletedLines": 4,
+          "patch": "@@ -15,11 +15,15 @@\n     public BigDecimal total(Cart cart) {\n         BigDecimal sum = cart.subtotal();\n-        if (cart.getCoupon() != null && cart.getCoupon().isActive()) {\n-            sum = sum.subtract(sum.multiply(cart.getCoupon().getRate()));\n-        }\n-        return sum.setScale(2, RoundingMode.HALF_UP);\n+        return applyCoupon(sum, cart.getCoupon()).setScale(2, RoundingMode.HALF_UP);\n+    }\n+\n+    private BigDecimal applyCoupon(BigDecimal sum, Coupon coupon) {\n+        if (coupon != null && coupon.isActive()) {\n+            return sum.subtract(sum.multiply(coupon.getRate()));\n+        }\n+        return sum;\n     }\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "rename-local-variables",
+    "description": "Переименование переменных",
+    "expected": { "categories": ["REFACTOR", "CHORE"], "riskLevels": ["NONE", "LOW"] },
+    "commit": {
+      "message": "Rename variables for readability",
+      "files": [
+        {
+          "path": "src/main/java/shop/report/ReportBuilder.java",
+          "changeType": "MODIFY",
+          "addedLines": 5,
+          "deletedLines": 5,
+          "patch": "@@ -40,11 +40,11 @@\n-        StringBuilder sb = new StringBuilder();\n-        List<Row> l = repository.load(id);\n-        for (Row r : l) {\n-            sb.append(r.format());\n+        StringBuilder builder = new StringBuilder();\n+        List<Row> rows = repository.load(id);\n+        for (Row row : rows) {\n+            builder.append(row.format());\n         }\n-        return sb.toString();\n+        return builder.toString();\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "tests-only",
+    "description": "Добавлены только тесты",
+    "expected": { "categories": ["TESTS"], "riskLevels": ["NONE"] },
+    "commit": {
+      "message": "Add unit tests for PriceCalculator",
+      "files": [
+        {
+          "path": "src/test/java/shop/pricing/PriceCalculatorTest.java",
+          "changeType": "ADD",
+          "addedLines": 15,
+          "deletedLines": 0,
+          "patch": "@@ -0,0 +1,15 @@\n+class PriceCalculatorTest {\n+    private final PriceCalculator calculator = new PriceCalculator();\n+\n+    @Test\n+    void appliesActiveCoupon() {\n+        Cart cart = cartWithSubtotal(\"100.00\", activeCoupon(\"0.10\"));\n+        assertEquals(new BigDecimal(\"90.00\"), calculator.total(cart));\n+    }\n+\n+    @Test\n+    void ignoresInactiveCoupon() {\n+        Cart cart = cartWithSubtotal(\"100.00\", inactiveCoupon(\"0.10\"));\n+        assertEquals(new BigDecimal(\"100.00\"), calculator.total(cart));\n+    }\n+}\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "docs-readme",
+    "description": "Документация по запуску",
+    "expected": { "categories": ["DOCS"], "riskLevels": ["NONE"] },
+    "commit": {
+      "message": "Document local setup",
+      "files": [
+        {
+          "path": "README.md",
+          "changeType": "MODIFY",
+          "addedLines": 5,
+          "deletedLines": 1,
+          "patch": "@@ -1,2 +1,6 @@\n # Shop\n-TODO\n+## Запуск\n+\n+1. Установите JDK 21.\n+2. Запустите `./mvnw spring-boot:run`.\n+3. Откройте http://localhost:8080.\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "build-spring-boot-upgrade",
+    "description": "Обновление мажорной версии фреймворка",
+    "expected": { "categories": ["BUILD"], "riskLevels": ["MEDIUM", "LOW"] },
+    "commit": {
+      "message": "Upgrade Spring Boot to 3.4.1",
+      "files": [
+        {
+          "path": "pom.xml",
+          "changeType": "MODIFY",
+          "addedLines": 1,
+          "deletedLines": 1,
+          "patch": "@@ -5,7 +5,7 @@\n     <parent>\n         <groupId>org.springframework.boot</groupId>\n         <artifactId>spring-boot-starter-parent</artifactId>\n-        <version>3.2.5</version>\n+        <version>3.4.1</version>\n     </parent>\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "ci-workflow",
+    "description": "Добавлен CI-конвейер",
+    "expected": { "categories": ["BUILD"], "riskLevels": ["NONE", "LOW"] },
+    "commit": {
+      "message": "Add CI workflow",
+      "files": [
+        {
+          "path": ".github/workflows/ci.yml",
+          "changeType": "ADD",
+          "addedLines": 12,
+          "deletedLines": 0,
+          "patch": "@@ -0,0 +1,12 @@\n+name: CI\n+on: [push, pull_request]\n+jobs:\n+  build:\n+    runs-on: ubuntu-latest\n+    steps:\n+      - uses: actions/checkout@v4\n+      - uses: actions/setup-java@v4\n+        with:\n+          distribution: temurin\n+          java-version: 21\n+      - run: ./mvnw -B verify\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "perf-cache-catalog",
+    "description": "Кэширование каталога с инвалидацией",
+    "expected": { "categories": ["PERFORMANCE"], "riskLevels": ["MEDIUM", "LOW"] },
+    "commit": {
+      "message": "Cache product catalog lookups",
+      "files": [
+        {
+          "path": "src/main/java/shop/catalog/ProductService.java",
+          "changeType": "MODIFY",
+          "addedLines": 3,
+          "deletedLines": 0,
+          "patch": "@@ -22,6 +22,9 @@\n+    @Cacheable(\"products\")\n     public Product findById(Long id) {\n         return repository.findById(id).orElseThrow();\n     }\n+\n+    @CacheEvict(value = \"products\", key = \"#product.id\")\n     public Product update(Product product) {\n"
+        },
+        {
+          "path": "src/main/java/shop/config/CacheConfig.java",
+          "changeType": "ADD",
+          "addedLines": 4,
+          "deletedLines": 0,
+          "patch": "@@ -0,0 +1,4 @@\n+@Configuration\n+@EnableCaching\n+public class CacheConfig {\n+}\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "perf-n-plus-one",
+    "description": "Устранение N+1 запросов",
+    "expected": { "categories": ["PERFORMANCE", "REFACTOR"], "riskLevels": ["LOW", "MEDIUM"] },
+    "commit": {
+      "message": "Load order items in one query",
+      "files": [
+        {
+          "path": "src/main/java/shop/order/OrderService.java",
+          "changeType": "MODIFY",
+          "addedLines": 1,
+          "deletedLines": 4,
+          "patch": "@@ -30,9 +30,6 @@\n     public List<OrderView> recentOrders() {\n-        List<Order> orders = orderRepository.findTop50ByOrderByCreatedAtDesc();\n-        for (Order order : orders) {\n-            order.setItems(itemRepository.findByOrderId(order.getId()));\n-        }\n+        List<Order> orders = orderRepository.findRecentWithItems(PageRequest.of(0, 50));\n         return orders.stream().map(OrderView::from).toList();\n     }\n"
+        },
+        {
+          "path": "src/main/java/shop/order/OrderRepository.java",
+          "changeType": "MODIFY",
+          "addedLines": 2,
+          "deletedLines": 0,
+          "patch": "@@ -12,4 +12,6 @@\n+    @Query(\"select distinct o from Order o left join fetch o.items order by o.createdAt desc\")\n+    List<Order> findRecentWithItems(Pageable pageable);\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "api-breaking-field-rename",
+    "description": "Переименование поля в публичном JSON-ответе",
+    "expected": { "categories": ["API", "REFACTOR"], "riskLevels": ["MEDIUM", "HIGH"] },
+    "commit": {
+      "message": "Rename userName to username in API response",
+      "files": [
+        {
+          "path": "src/main/java/shop/user/UserDto.java",
+          "changeType": "MODIFY",
+          "addedLines": 2,
+          "deletedLines": 2,
+          "patch": "@@ -8,8 +8,8 @@ public record UserDto(\n         Long id,\n-        @JsonProperty(\"userName\")\n-        String userName,\n+        @JsonProperty(\"username\")\n+        String username,\n         String email\n ) {\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "fix-pagination-off-by-one",
+    "description": "Ошибка на единицу в пагинации",
+    "expected": { "categories": ["FIX"], "riskLevels": ["LOW", "MEDIUM"] },
+    "commit": {
+      "message": "Fix skipped items between pages",
+      "files": [
+        {
+          "path": "src/main/java/shop/common/PageUtils.java",
+          "changeType": "MODIFY",
+          "addedLines": 1,
+          "deletedLines": 1,
+          "patch": "@@ -10,7 +10,7 @@\n     public static int offset(int page, int size) {\n-        return page * size + 1;\n+        return page * size;\n     }\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "feature-shipping-email",
+    "description": "Уведомление клиента об отправке заказа",
+    "expected": { "categories": ["FEATURE"], "riskLevels": ["LOW", "MEDIUM"] },
+    "commit": {
+      "message": "Send email when order is shipped",
+      "files": [
+        {
+          "path": "src/main/java/shop/notification/OrderShippedListener.java",
+          "changeType": "ADD",
+          "addedLines": 14,
+          "deletedLines": 0,
+          "patch": "@@ -0,0 +1,14 @@\n+@Component\n+public class OrderShippedListener {\n+    private final MailSender mailSender;\n+\n+    @EventListener\n+    public void onShipped(OrderShippedEvent event) {\n+        SimpleMailMessage message = new SimpleMailMessage();\n+        message.setTo(event.customerEmail());\n+        message.setSubject(\"Ваш заказ отправлен\");\n+        message.setText(\"Заказ №\" + event.orderNumber() + \" передан в доставку.\");\n+        mailSender.send(message);\n+    }\n+}\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "config-payment-timeout",
+    "description": "Изменение таймаута внешней интеграции",
+    "expected": { "categories": ["BUILD", "CHORE", "PERFORMANCE", "API"], "riskLevels": ["LOW", "MEDIUM"] },
+    "commit": {
+      "message": "Increase payment gateway timeout",
+      "files": [
+        {
+          "path": "src/main/resources/application.yml",
+          "changeType": "MODIFY",
+          "addedLines": 1,
+          "deletedLines": 1,
+          "patch": "@@ -14,5 +14,5 @@\n payment:\n   gateway:\n     url: https://pay.example.com\n-    read-timeout: 5s\n+    read-timeout: 30s\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "swallowed-payment-exception",
+    "description": "Проглоченное исключение при оплате: заказ помечается оплаченным",
+    "expected": { "categories": ["FIX", "REFACTOR"], "riskLevels": ["HIGH", "MEDIUM"] },
+    "commit": {
+      "message": "Make payment processing more robust",
+      "files": [
+        {
+          "path": "src/main/java/shop/payment/PaymentService.java",
+          "changeType": "MODIFY",
+          "addedLines": 5,
+          "deletedLines": 2,
+          "patch": "@@ -40,8 +40,11 @@\n     public void charge(Order order) {\n-        gateway.charge(order.getCardToken(), order.getTotal());\n-        order.markPaid();\n+        try {\n+            gateway.charge(order.getCardToken(), order.getTotal());\n+        } catch (Exception e) {\n+        }\n+        order.markPaid();\n     }\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "logging-plain-password",
+    "description": "Пароль пользователя пишется в лог",
+    "expected": { "categories": ["SECURITY", "CHORE"], "riskLevels": ["HIGH", "MEDIUM"] },
+    "commit": {
+      "message": "Add login debug logging",
+      "files": [
+        {
+          "path": "src/main/java/shop/auth/AuthService.java",
+          "changeType": "MODIFY",
+          "addedLines": 1,
+          "deletedLines": 0,
+          "patch": "@@ -25,6 +25,7 @@\n     public Session login(String username, String password) {\n+        log.info(\"Login attempt: user={}, password={}\", username, password);\n         User user = userRepository.findByUsername(username).orElseThrow();\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "formatting-only",
+    "description": "Только форматирование и порядок импортов",
+    "expected": { "categories": ["CHORE", "REFACTOR"], "riskLevels": ["NONE"] },
+    "commit": {
+      "message": "Reformat code",
+      "files": [
+        {
+          "path": "src/main/java/shop/invoice/InvoiceService.java",
+          "changeType": "MODIFY",
+          "addedLines": 5,
+          "deletedLines": 5,
+          "patch": "@@ -1,9 +1,9 @@\n-import java.util.List;\n-import java.math.BigDecimal;\n+import java.math.BigDecimal;\n+import java.util.List;\n \n public class InvoiceService {\n-  public BigDecimal total(List<Line> lines){\n-    return lines.stream().map(Line::amount).reduce(BigDecimal.ZERO,BigDecimal::add);\n-  }\n+    public BigDecimal total(List<Line> lines) {\n+        return lines.stream().map(Line::amount).reduce(BigDecimal.ZERO, BigDecimal::add);\n+    }\n }\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "remove-dead-code",
+    "description": "Удаление неиспользуемого класса",
+    "expected": { "categories": ["REFACTOR", "CHORE"], "riskLevels": ["NONE", "LOW"] },
+    "commit": {
+      "message": "Remove unused LegacyExporter",
+      "files": [
+        {
+          "path": "src/main/java/shop/export/LegacyExporter.java",
+          "changeType": "DELETE",
+          "addedLines": 0,
+          "deletedLines": 8,
+          "patch": "@@ -1,8 +0,0 @@\n-@Deprecated\n-public class LegacyExporter {\n-    public String exportCsv(List<Order> orders) {\n-        StringBuilder csv = new StringBuilder();\n-        orders.forEach(o -> csv.append(o.getId()).append(';').append(o.getTotal()).append('\\n'));\n-        return csv.toString();\n-    }\n-}\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "feature-flag-new-checkout",
+    "description": "Новый сценарий оформления заказа включён по умолчанию",
+    "expected": { "categories": ["FEATURE", "BUILD", "API"], "riskLevels": ["MEDIUM", "HIGH"] },
+    "commit": {
+      "message": "Enable new checkout flow",
+      "files": [
+        {
+          "path": "src/main/resources/application.properties",
+          "changeType": "MODIFY",
+          "addedLines": 1,
+          "deletedLines": 1,
+          "patch": "@@ -8,3 +8,3 @@\n-features.new-checkout.enabled=false\n+features.new-checkout.enabled=true\n"
+        },
+        {
+          "path": "src/main/java/shop/checkout/CheckoutController.java",
+          "changeType": "MODIFY",
+          "addedLines": 6,
+          "deletedLines": 0,
+          "patch": "@@ -30,6 +30,12 @@\n+    @PostMapping(\"/api/checkout\")\n+    public CheckoutResult checkout(@RequestBody CheckoutRequest request) {\n+        return features.newCheckout()\n+                ? newCheckoutService.checkout(request)\n+                : legacyCheckoutService.checkout(request);\n+    }\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "admin-delete-authorization",
+    "description": "Ограничение удаления пользователей ролью администратора",
+    "expected": { "categories": ["SECURITY"], "riskLevels": ["MEDIUM", "LOW"] },
+    "commit": {
+      "message": "Restrict user deletion to administrators",
+      "files": [
+        {
+          "path": "src/main/java/shop/admin/UserAdminController.java",
+          "changeType": "MODIFY",
+          "addedLines": 1,
+          "deletedLines": 0,
+          "patch": "@@ -40,6 +40,7 @@\n+    @PreAuthorize(\"hasRole('ADMIN')\")\n     @DeleteMapping(\"/api/users/{id}\")\n     public void delete(@PathVariable Long id) {\n         userService.delete(id);\n"
+        }
+      ]
+    }
+  }
+]

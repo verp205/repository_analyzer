@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit;
 @Configuration
 public class AnalysisExecutorConfig {
 
-    @Bean(name = "analysisExecutor", destroyMethod = "shutdown")
+    @Bean(name = "analysisExecutor", destroyMethod = "shutdownNow")
     public ExecutorService analysisExecutor(AnalysisProperties properties) {
         ThreadFactory threadFactory = Thread.ofPlatform()
                 .name("analysis-worker-", 0)

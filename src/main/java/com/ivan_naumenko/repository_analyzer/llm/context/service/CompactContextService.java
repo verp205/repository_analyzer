@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.IntStream;
 
 @Service
 @RequiredArgsConstructor
@@ -55,9 +56,17 @@ public class CompactContextService {
                 properties.maxFiles()
         );
 
+        List<Integer> selectedPositions = selectFilePositions(
+                diff.changedFiles(),
+                fileLimit
+        );
         List<CompactFileContext> files = new ArrayList<>(fileLimit);
+        int remainingPatchCharacters = properties.maxPatchCharactersTotal();
 
-        for (int position = 0; position < fileLimit; position++) {
+        for (int selectedIndex = 0;
+             selectedIndex < selectedPositions.size();
+             selectedIndex++) {
+            int position = selectedPositions.get(selectedIndex);
             ChangedFile changedFile = diff.changedFiles().get(position);
             JavaFileAnalysis javaAnalysis = analysesByPosition.get(position);
 
@@ -68,7 +77,21 @@ public class CompactContextService {
                 );
             }
 
-            files.add(toFileContext(changedFile, javaAnalysis));
+            int remainingFiles = fileLimit - selectedIndex;
+            int fairPatchLimit = Math.min(
+                    properties.maxPatchCharactersPerFile(),
+                    divideRoundingUp(
+                            remainingPatchCharacters,
+                            remainingFiles
+                    )
+            );
+            CompactFileContext file = toFileContext(
+                    changedFile,
+                    javaAnalysis,
+                    fairPatchLimit
+            );
+            files.add(file);
+            remainingPatchCharacters -= file.patch().length();
         }
 
         int omittedFileCount = diff.changedFiles().size() - fileLimit;
@@ -141,9 +164,10 @@ public class CompactContextService {
 
     private CompactFileContext toFileContext(
             ChangedFile changedFile,
-            JavaFileAnalysis javaAnalysis
+            JavaFileAnalysis javaAnalysis,
+            int patchLimit
     ) {
-        TruncatedText patch = truncatePatch(changedFile.patch());
+        TruncatedText patch = truncatePatch(changedFile.patch(), patchLimit);
         CompactJavaFileContext compactJavaAnalysis = javaAnalysis == null
                 ? null
                 : toJavaFileContext(javaAnalysis);
@@ -162,19 +186,97 @@ public class CompactContextService {
     private CompactJavaFileContext toJavaFileContext(
             JavaFileAnalysis analysis
     ) {
+        List<String> imports = analysis.imports()
+                .stream()
+                .limit(properties.maxImportsPerFile())
+                .toList();
+        List<String> parsingProblems = analysis.problems()
+                .stream()
+                .limit(properties.maxParsingProblemsPerFile())
+                .toList();
         List<CompactJavaTypeContext> types = analysis.types()
                 .stream()
+                .limit(properties.maxTypesPerFile())
                 .map(this::toTypeContext)
                 .toList();
 
         return new CompactJavaFileContext(
                 analysis.packageName(),
-                analysis.imports(),
+                imports,
+                analysis.imports().size() - imports.size(),
                 analysis.lineCount(),
                 analysis.parsingSuccessful(),
-                analysis.problems(),
-                types
+                parsingProblems,
+                analysis.problems().size() - parsingProblems.size(),
+                types,
+                analysis.types().size() - types.size()
         );
+    }
+
+    private List<Integer> selectFilePositions(
+            List<ChangedFile> files,
+            int limit
+    ) {
+        return IntStream.range(0, files.size())
+                .boxed()
+                .sorted((left, right) -> compareImportance(
+                        files.get(left),
+                        files.get(right),
+                        left,
+                        right
+                ))
+                .limit(limit)
+                .toList();
+    }
+
+    private int compareImportance(
+            ChangedFile left,
+            ChangedFile right,
+            int leftPosition,
+            int rightPosition
+    ) {
+        int priorityComparison = Integer.compare(
+                filePriority(right),
+                filePriority(left)
+        );
+        if (priorityComparison != 0) {
+            return priorityComparison;
+        }
+
+        int sizeComparison = Integer.compare(
+                changeSize(right),
+                changeSize(left)
+        );
+        if (sizeComparison != 0) {
+            return sizeComparison;
+        }
+
+        return Integer.compare(leftPosition, rightPosition);
+    }
+
+    private int filePriority(ChangedFile file) {
+        String path = Objects.requireNonNullElse(file.path(), "")
+                .toLowerCase();
+
+        if (path.contains("security")
+                || path.contains("auth")
+                || path.contains("migration")
+                || path.contains("schema")
+                || path.contains("config")
+                || path.contains("application.")
+                || path.endsWith("pom.xml")
+                || path.endsWith("build.gradle")
+                || path.endsWith("build.gradle.kts")) {
+            return 3;
+        }
+        if (file.javaFile()) {
+            return 2;
+        }
+        return 1;
+    }
+
+    private int changeSize(ChangedFile file) {
+        return file.addedLines() + file.deletedLines();
     }
 
     private CompactJavaTypeContext toTypeContext(JavaTypeAnalysis analysis) {
@@ -213,14 +315,16 @@ public class CompactContextService {
         );
     }
 
-    private TruncatedText truncatePatch(String patch) {
-        int limit = properties.maxPatchCharactersPerFile();
-
+    private TruncatedText truncatePatch(String patch, int limit) {
         if (patch.length() <= limit) {
             return new TruncatedText(patch, false);
         }
 
         return new TruncatedText(patch.substring(0, limit), true);
+    }
+
+    private int divideRoundingUp(int value, int divisor) {
+        return (value + divisor - 1) / divisor;
     }
 
     private boolean requiresJavaAnalysis(ChangedFile changedFile) {

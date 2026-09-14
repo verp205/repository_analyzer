@@ -6,16 +6,22 @@ import java.util.Objects;
 public record CompactJavaFileContext(
         String packageName,
         List<String> imports,
+        int omittedImportCount,
         int lineCount,
         boolean parsingSuccessful,
         List<String> parsingProblems,
-        List<CompactJavaTypeContext> types
+        int omittedParsingProblemCount,
+        List<CompactJavaTypeContext> types,
+        int omittedTypeCount
 ) {
 
     public CompactJavaFileContext {
-        if (lineCount < 0) {
+        if (lineCount < 0
+                || omittedImportCount < 0
+                || omittedParsingProblemCount < 0
+                || omittedTypeCount < 0) {
             throw new IllegalArgumentException(
-                    "Количество строк Java-файла не может быть отрицательным"
+                    "Счётчики Java-контекста не могут быть отрицательными"
             );
         }
 

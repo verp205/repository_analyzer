@@ -231,6 +231,66 @@ class AnalysisRecoveryServiceTest {
         assertSame(cause, thrown.getCause());
     }
 
+    @Test
+    void restartsCancelledTaskWhenPreparationAndCommitsHaveStopped() {
+        when(repositoryCommitRepository
+                .countByAnalysisTask_IdAndProcessingStatusIn(
+                        eq(TASK_ID),
+                        any()
+                )).thenReturn(0L);
+        when(analysisTaskService.updateStatusIfCurrent(
+                TASK_ID,
+                AnalysisTaskStatus.CANCELLED,
+                AnalysisTaskStatus.NEW
+        )).thenReturn(true);
+        when(analysisOrchestrator.start(TASK_ID)).thenReturn(true);
+
+        assertTrue(recoveryService.retryCancelledTask(TASK_ID));
+
+        verify(repositoryCommitRepository).requeueRetryableFailedCommits(
+                eq(TASK_ID),
+                eq(CommitProcessingStatus.FAILED),
+                eq(CommitProcessingStatus.NEW),
+                any(LocalDateTime.class),
+                eq(MAX_ATTEMPTS),
+                eq(AnalysisTaskStatus.CANCELLED)
+        );
+        verify(analysisOrchestrator).start(TASK_ID);
+    }
+
+    @Test
+    void doesNotRestartCancelledTaskWhilePreparationIsRunning() {
+        when(analysisOrchestrator.isPreparationRunning(TASK_ID))
+                .thenReturn(true);
+
+        assertFalse(recoveryService.retryCancelledTask(TASK_ID));
+
+        verifyNoInteractions(repositoryCommitRepository);
+        verify(analysisTaskService, never()).updateStatusIfCurrent(
+                any(),
+                any(),
+                any()
+        );
+    }
+
+    @Test
+    void doesNotRestartCancelledTaskWhileCommitIsFinishing() {
+        when(repositoryCommitRepository
+                .countByAnalysisTask_IdAndProcessingStatusIn(
+                        eq(TASK_ID),
+                        any()
+                )).thenReturn(1L);
+
+        assertFalse(recoveryService.retryCancelledTask(TASK_ID));
+
+        verify(analysisTaskService, never()).updateStatusIfCurrent(
+                any(),
+                any(),
+                any()
+        );
+        verify(analysisOrchestrator, never()).start(TASK_ID);
+    }
+
     private AnalysisTaskRecoveryCandidate candidate(
             Integer taskId,
             AnalysisTaskStatus status

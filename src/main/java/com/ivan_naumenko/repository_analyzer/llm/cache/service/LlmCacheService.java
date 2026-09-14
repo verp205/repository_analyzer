@@ -45,7 +45,6 @@ public class LlmCacheService {
         validateText(cacheNamespace, "cacheNamespace");
         validateText(prompt, "prompt");
         validateText(response, "response");
-        Objects.requireNonNull(audience, "audience не должен быть null");
 
         String calculatedHash = promptHashService.calculate(
                 cacheNamespace + "\n" + prompt
@@ -89,7 +88,7 @@ public class LlmCacheService {
                     "В кэше найден другой prompt с тем же hash"
             );
         }
-        if (existing.getAudience() != audience) {
+        if (!Objects.equals(existing.getAudience(), audience)) {
             throw new IllegalStateException(
                     "В кэше найден prompt с другой аудиторией отчёта"
             );

@@ -14,6 +14,18 @@ public record ContextProperties(
         int maxPatchCharactersPerFile,
 
         @Min(1)
+        int maxPatchCharactersTotal,
+
+        @Min(1)
+        int maxImportsPerFile,
+
+        @Min(1)
+        int maxParsingProblemsPerFile,
+
+        @Min(1)
+        int maxTypesPerFile,
+
+        @Min(1)
         int maxMethodsPerType
 ) {
 }

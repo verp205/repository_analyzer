@@ -1,17 +1,22 @@
 package com.ivan_naumenko.repository_analyzer.report.orchestrator;
 
-import com.ivan_naumenko.repository_analyzer.commit.model.CommitProcessingStatus;
-import com.ivan_naumenko.repository_analyzer.commit.repository.RepositoryCommitRepository;
-import com.ivan_naumenko.repository_analyzer.llm.context.model.CompactCommitContext;
-import com.ivan_naumenko.repository_analyzer.llm.context.service.StoredCommitContextService;
-import com.ivan_naumenko.repository_analyzer.llm.coordinator.LlmRequestCoordinator;
-import com.ivan_naumenko.repository_analyzer.llm.prompt.service.PromptFactory;
-import com.ivan_naumenko.repository_analyzer.insight.cluster.dto.CommitClustersResponse;
-import com.ivan_naumenko.repository_analyzer.insight.cluster.service.CommitClusteringService;
-import com.ivan_naumenko.repository_analyzer.insight.graph.dto.CommitGraphResponse;
-import com.ivan_naumenko.repository_analyzer.insight.graph.service.CommitGraphService;
+import com.ivan_naumenko.repository_analyzer.commitinsight.dto.CommitInsightResponse;
+import com.ivan_naumenko.repository_analyzer.commitinsight.model.CommitInsightDraft;
+import com.ivan_naumenko.repository_analyzer.commitinsight.model.InsightWorkUnit;
+import com.ivan_naumenko.repository_analyzer.commitinsight.service.CommitInsightGenerator;
+import com.ivan_naumenko.repository_analyzer.commitinsight.service.CommitInsightPlanner;
+import com.ivan_naumenko.repository_analyzer.commitinsight.service.CommitInsightService;
+import com.ivan_naumenko.repository_analyzer.diff.model.CommitChangeSummary;
+import com.ivan_naumenko.repository_analyzer.diff.service.TaskChangeService;
+import com.ivan_naumenko.repository_analyzer.report.config.ReportProperties;
+import com.ivan_naumenko.repository_analyzer.report.dto.AnalysisReportResponse;
+import com.ivan_naumenko.repository_analyzer.report.facts.dto.RepositoryFactsResponse;
+import com.ivan_naumenko.repository_analyzer.report.facts.service.RepositoryFactsService;
 import com.ivan_naumenko.repository_analyzer.report.model.ReportGenerationData;
+import com.ivan_naumenko.repository_analyzer.report.model.ReportStatus;
 import com.ivan_naumenko.repository_analyzer.report.service.AnalysisReportService;
+import com.ivan_naumenko.repository_analyzer.report.service.ProjectSynthesisService;
+import com.ivan_naumenko.repository_analyzer.report.service.ReportPeriodResolver;
 import com.ivan_naumenko.repository_analyzer.report.sse.ReportEvent;
 import com.ivan_naumenko.repository_analyzer.report.sse.ReportEventService;
 import org.slf4j.Logger;
@@ -20,11 +25,27 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * Формирует отчёт в два этапа:
+ * 1) анализ коммитов периода без привязки к роли (результат общий для всех
+ *    отчётов задачи и переиспользуется);
+ * 2) ролевой синтез по фактам и результатам анализа.
+ * Остановка отчёта прерывает выполняющиеся потоки, а вместе с ними —
+ * HTTP-запросы к модели.
+ */
 @Component
 public class ReportOrchestrator {
 
@@ -33,34 +54,42 @@ public class ReportOrchestrator {
     );
 
     private final AnalysisReportService reportService;
-    private final RepositoryCommitRepository commitRepository;
-    private final StoredCommitContextService contextService;
-    private final PromptFactory promptFactory;
-    private final LlmRequestCoordinator requestCoordinator;
-    private final CommitGraphService graphService;
-    private final CommitClusteringService clusteringService;
+    private final TaskChangeService changeService;
+    private final ReportPeriodResolver periodResolver;
+    private final CommitInsightService insightService;
+    private final CommitInsightPlanner planner;
+    private final CommitInsightGenerator generator;
+    private final RepositoryFactsService factsService;
+    private final ProjectSynthesisService synthesisService;
     private final ReportEventService eventService;
+    private final ReportProperties properties;
     private final ExecutorService executor;
+    private final Map<Integer, GenerationSession> activeSessions =
+            new ConcurrentHashMap<>();
 
     public ReportOrchestrator(
             AnalysisReportService reportService,
-            RepositoryCommitRepository commitRepository,
-            StoredCommitContextService contextService,
-            PromptFactory promptFactory,
-            LlmRequestCoordinator requestCoordinator,
-            CommitGraphService graphService,
-            CommitClusteringService clusteringService,
+            TaskChangeService changeService,
+            ReportPeriodResolver periodResolver,
+            CommitInsightService insightService,
+            CommitInsightPlanner planner,
+            CommitInsightGenerator generator,
+            RepositoryFactsService factsService,
+            ProjectSynthesisService synthesisService,
             ReportEventService eventService,
+            ReportProperties properties,
             @Qualifier("analysisExecutor") ExecutorService executor
     ) {
         this.reportService = reportService;
-        this.commitRepository = commitRepository;
-        this.contextService = contextService;
-        this.promptFactory = promptFactory;
-        this.requestCoordinator = requestCoordinator;
-        this.graphService = graphService;
-        this.clusteringService = clusteringService;
+        this.changeService = changeService;
+        this.periodResolver = periodResolver;
+        this.insightService = insightService;
+        this.planner = planner;
+        this.generator = generator;
+        this.factsService = factsService;
+        this.synthesisService = synthesisService;
         this.eventService = eventService;
+        this.properties = properties;
         this.executor = executor;
     }
 
@@ -71,7 +100,7 @@ public class ReportOrchestrator {
         }
 
         try {
-            executor.execute(() -> generate(reportId));
+            executor.execute(() -> prepare(reportId));
             return true;
         } catch (RejectedExecutionException exception) {
             reportService.returnToNew(reportId);
@@ -79,149 +108,364 @@ public class ReportOrchestrator {
         }
     }
 
-    private void generate(Integer reportId) {
+    public boolean cancel(Integer reportId) {
+        Objects.requireNonNull(reportId, "reportId не должен быть null");
+        if (!reportService.cancel(reportId)) {
+            return false;
+        }
+
+        GenerationSession session = activeSessions.remove(reportId);
+        if (session != null) {
+            session.stopForCancellation();
+        }
+        AnalysisReportResponse current = reportService.getResponse(reportId);
+        publish(
+                "CANCELLED",
+                reportId,
+                ReportStatus.CANCELLED,
+                current.processedCommits(),
+                current.totalCommits(),
+                "Формирование отчёта остановлено пользователем",
+                List.of()
+        );
+        eventService.complete(reportId);
+        return true;
+    }
+
+    private void prepare(Integer reportId) {
         try {
             ReportGenerationData report = reportService.getGenerationData(
                     reportId
             );
-            List<Integer> commitIds = commitRepository.findIdsForReport(
-                    report.taskId(),
-                    CommitProcessingStatus.COMPLETED
+            List<CommitChangeSummary> commits = periodResolver.filter(
+                    report,
+                    changeService.load(report.taskId())
             );
-            reportService.initializeProgress(reportId, commitIds.size());
-            CommitGraphResponse graph = graphService.build(report.taskId());
-            CommitClustersResponse clusters = clusteringService.cluster(
+            Set<Integer> reusable = insightService.findReusableCommitIds(
                     report.taskId()
             );
+            List<CommitChangeSummary> pending = commits.stream()
+                    .filter(commit -> !reusable.contains(commit.commitId()))
+                    .toList();
+            List<InsightWorkUnit> units = planner.plan(pending);
+            int alreadyAnalyzed = commits.size() - pending.size();
+
+            reportService.initializeProgress(reportId, commits.size());
+            if (alreadyAnalyzed > 0) {
+                reportService.updateProgress(reportId, alreadyAnalyzed);
+            }
             publish(
                     "STARTED",
                     reportId,
-                    0,
-                    commitIds.size(),
-                    "Формирование отчёта начато",
-                    null
+                    ReportStatus.PROCESSING,
+                    alreadyAnalyzed,
+                    commits.size(),
+                    pending.isEmpty()
+                            ? "Коммиты уже проанализированы, формируются выводы"
+                            : "Анализ коммитов начат: " + report.period().label(),
+                    List.of()
             );
-
-            StringBuilder content = new StringBuilder()
-                    .append("# Отчёт по истории репозитория\n\n")
-                    .append("Аудитория: ")
-                    .append(report.audience())
-                    .append("\n\n")
-                    .append("## Техническая сводка\n\n")
-                    .append("- Коммитов: ")
-                    .append(graph.totalCommits())
-                    .append("\n- Корней графа: ")
-                    .append(graph.rootCount())
-                    .append("\n- Ветвей без потомков: ")
-                    .append(graph.tipCount())
-                    .append("\n- Merge-коммитов: ")
-                    .append(graph.mergeCommitCount())
-                    .append("\n- Максимальная глубина: ")
-                    .append(graph.maxDepth())
-                    .append("\n\n## Группы изменений\n\n");
-
-            if (clusters.clusters().isEmpty()) {
-                content.append("Изменения для кластеризации отсутствуют.\n\n");
-            } else {
-                clusters.clusters().forEach(cluster -> content
-                        .append("- ")
-                        .append(cluster.displayName())
-                        .append(": ")
-                        .append(cluster.commits().size())
-                        .append("\n"));
-                content.append("\n");
-            }
-
-            reportService.updateProgress(reportId, 0, content.toString());
-            publish(
-                    "SUMMARY",
+            log.info(
+                    "Отчёт {} ({}): коммитов {}, уже проанализировано {}, единиц работы {}",
                     reportId,
-                    0,
-                    commitIds.size(),
-                    "Техническая сводка сформирована",
-                    content.toString()
+                    report.period().label(),
+                    commits.size(),
+                    alreadyAnalyzed,
+                    units.size()
             );
 
-            for (int position = 0; position < commitIds.size(); position++) {
-                Integer commitId = commitIds.get(position);
-                CompactCommitContext context = contextService.load(commitId);
-                String prompt = promptFactory.build(
-                        context,
-                        report.audience()
-                );
-                String response = requestCoordinator.getOrGenerate(
-                        prompt,
-                        report.audience()
-                );
-
-                String commitSection = new StringBuilder()
-                        .append("## ")
-                        .append(context.commitHash())
-                        .append(" — ")
-                        .append(context.message())
-                        .append("\n\n")
-                        .append(response)
-                        .append("\n\n")
-                        .toString();
-                content.append(commitSection);
-
-                int processed = position + 1;
-                reportService.updateProgress(
-                        reportId,
-                        processed,
-                        content.toString()
-                );
-                publish(
-                        "PROGRESS",
-                        reportId,
-                        processed,
-                        commitIds.size(),
-                        "Обработан коммит " + context.commitHash(),
-                        commitSection
+            GenerationSession session = new GenerationSession(
+                    report,
+                    commits,
+                    units,
+                    alreadyAnalyzed
+            );
+            GenerationSession existing = activeSessions.putIfAbsent(
+                    reportId,
+                    session
+            );
+            if (existing != null) {
+                throw new IllegalStateException(
+                        "Отчёт уже формируется: " + reportId
                 );
             }
+            if (reportService.isCancelled(reportId)) {
+                session.stopForCancellation();
+                return;
+            }
+            session.start();
+        } catch (Throwable exception) {
+            if (!reportService.isCancelled(reportId)) {
+                failReport(reportId, 0, 0, exception);
+            }
+        }
+    }
 
-            reportService.complete(reportId, content.toString());
-            publish(
-                    "COMPLETED",
-                    reportId,
-                    commitIds.size(),
-                    commitIds.size(),
-                    "Отчёт сформирован",
-                    null
-            );
-            eventService.complete(reportId);
-        } catch (Exception exception) {
-            reportService.fail(reportId, exception);
+    private void failReport(
+            Integer reportId,
+            int processed,
+            int total,
+            Throwable exception
+    ) {
+        activeSessions.remove(reportId);
+        Throwable cause = unwrap(exception);
+        try {
+            reportService.fail(reportId, cause);
             publish(
                     "FAILED",
                     reportId,
-                    0,
-                    0,
-                    exception.getMessage(),
-                    null
+                    ReportStatus.FAILED,
+                    processed,
+                    total,
+                    Objects.toString(cause.getMessage(), "Неизвестная ошибка"),
+                    List.of()
             );
+        } finally {
             eventService.complete(reportId);
-            log.error("Формирование отчёта {} завершилось ошибкой", reportId, exception);
+            log.error(
+                    "Формирование отчёта {} завершилось ошибкой",
+                    reportId,
+                    cause
+            );
         }
+    }
+
+    private Throwable unwrap(Throwable exception) {
+        if (exception instanceof CompletionException completionException
+                && completionException.getCause() != null) {
+            return completionException.getCause();
+        }
+        return exception;
     }
 
     private void publish(
             String type,
             Integer reportId,
+            ReportStatus status,
             int processed,
             int total,
             String message,
-            String contentChunk
+            List<CommitInsightResponse> commits
     ) {
         eventService.publish(new ReportEvent(
                 type,
                 reportId,
+                status.name(),
                 processed,
                 total,
                 message,
-                contentChunk,
+                commits,
                 LocalDateTime.now()
         ));
+    }
+
+    private final class GenerationSession {
+
+        private final ReportGenerationData report;
+        private final List<CommitChangeSummary> commits;
+        private final List<InsightWorkUnit> units;
+        private final int totalCommits;
+        private final AtomicInteger nextUnitIndex = new AtomicInteger();
+        private final AtomicInteger completedUnits = new AtomicInteger();
+        private final AtomicInteger processedCommits;
+        private final AtomicBoolean stopped = new AtomicBoolean();
+        private final AtomicBoolean synthesisStarted = new AtomicBoolean();
+        private final Object progressMonitor = new Object();
+        private final Set<Future<?>> runningUnits = ConcurrentHashMap.newKeySet();
+        private final Object synthesisLock = new Object();
+        private Thread synthesisThread;
+
+        private GenerationSession(
+                ReportGenerationData report,
+                List<CommitChangeSummary> commits,
+                List<InsightWorkUnit> units,
+                int alreadyAnalyzed
+        ) {
+            this.report = report;
+            this.commits = List.copyOf(commits);
+            this.units = List.copyOf(units);
+            this.totalCommits = commits.size();
+            this.processedCommits = new AtomicInteger(alreadyAnalyzed);
+        }
+
+        private void start() {
+            if (units.isEmpty()) {
+                if (synthesisStarted.compareAndSet(false, true)) {
+                    beginSynthesis();
+                }
+                return;
+            }
+            int initialTasks = Math.min(properties.maxInFlight(), units.size());
+            for (int index = 0; index < initialTasks; index++) {
+                submitNext();
+            }
+        }
+
+        private void submitNext() {
+            if (stopped.get()) {
+                return;
+            }
+            int unitIndex = nextUnitIndex.getAndIncrement();
+            if (unitIndex >= units.size()) {
+                return;
+            }
+
+            InsightWorkUnit unit = units.get(unitIndex);
+            try {
+                Future<?> future = executor.submit(() -> runUnit(unit));
+                runningUnits.add(future);
+                if (stopped.get()) {
+                    future.cancel(true);
+                }
+            } catch (Throwable exception) {
+                fail(exception);
+            }
+        }
+
+        private void runUnit(InsightWorkUnit unit) {
+            List<CommitInsightResponse> insights;
+            try {
+                insights = process(unit);
+            } catch (Throwable exception) {
+                fail(exception);
+                return;
+            }
+            try {
+                accept(insights);
+            } catch (Throwable callbackFailure) {
+                fail(callbackFailure);
+            }
+        }
+
+        private List<CommitInsightResponse> process(InsightWorkUnit unit) {
+            Map<Integer, CommitInsightDraft> drafts = generator.generate(
+                    unit,
+                    report.repositoryUrl()
+            );
+            List<CommitInsightResponse> saved = new ArrayList<>(unit.commits().size());
+            for (CommitChangeSummary commit : unit.commits()) {
+                if (stopped.get()) {
+                    return List.of();
+                }
+                CommitInsightDraft draft = drafts.get(commit.commitId());
+                if (draft == null) {
+                    throw new IllegalStateException(
+                            "Нет результата анализа коммита " + commit.commitHash()
+                    );
+                }
+                insightService.save(commit.commitId(), draft);
+                saved.add(insightService.toResponse(commit, draft));
+            }
+            return saved;
+        }
+
+        private void accept(List<CommitInsightResponse> insights) {
+            boolean shouldSynthesize;
+            synchronized (progressMonitor) {
+                if (stopped.get()) {
+                    return;
+                }
+                int processed = processedCommits.addAndGet(insights.size());
+                int completed = completedUnits.incrementAndGet();
+                reportService.updateProgress(report.reportId(), processed);
+                publish(
+                        "PROGRESS",
+                        report.reportId(),
+                        ReportStatus.PROCESSING,
+                        processed,
+                        totalCommits,
+                        "Проанализировано коммитов: %d из %d".formatted(
+                                processed,
+                                totalCommits
+                        ),
+                        insights
+                );
+                shouldSynthesize = completed == units.size()
+                        && synthesisStarted.compareAndSet(false, true);
+            }
+
+            submitNext();
+            if (shouldSynthesize) {
+                beginSynthesis();
+            }
+        }
+
+        private void beginSynthesis() {
+            synchronized (synthesisLock) {
+                if (stopped.get()) {
+                    return;
+                }
+                synthesisThread = Thread.currentThread();
+            }
+
+            try {
+                publish(
+                        "SYNTHESIS",
+                        report.reportId(),
+                        ReportStatus.PROCESSING,
+                        totalCommits,
+                        totalCommits,
+                        "Коммиты обработаны, формируются выводы для роли «%s»"
+                                .formatted(report.audience().displayName()),
+                        List.of()
+                );
+                RepositoryFactsResponse facts = factsService.build(report.taskId(), commits);
+                List<CommitInsightResponse> insights = insightService.findForCommits(
+                        report.taskId(),
+                        commits
+                );
+                String content = synthesisService.synthesize(
+                        report,
+                        facts,
+                        insights
+                );
+                if (stopped.get()) {
+                    return;
+                }
+                reportService.complete(report.reportId(), content);
+                stopped.set(true);
+                activeSessions.remove(report.reportId(), this);
+                publish(
+                        "COMPLETED",
+                        report.reportId(),
+                        ReportStatus.COMPLETED,
+                        totalCommits,
+                        totalCommits,
+                        "Отчёт сформирован",
+                        List.of()
+                );
+                eventService.complete(report.reportId());
+            } catch (Throwable exception) {
+                fail(exception);
+            } finally {
+                synchronized (synthesisLock) {
+                    synthesisThread = null;
+                }
+            }
+        }
+
+        private void fail(Throwable exception) {
+            if (!stopped.compareAndSet(false, true)) {
+                return;
+            }
+            activeSessions.remove(report.reportId(), this);
+            failReport(
+                    report.reportId(),
+                    processedCommits.get(),
+                    totalCommits,
+                    exception
+            );
+        }
+
+        private void stopForCancellation() {
+            stopped.set(true);
+            activeSessions.remove(report.reportId(), this);
+            runningUnits.forEach(future -> future.cancel(true));
+            synchronized (synthesisLock) {
+                if (synthesisThread != null) {
+                    synthesisThread.interrupt();
+                }
+            }
+        }
     }
 }

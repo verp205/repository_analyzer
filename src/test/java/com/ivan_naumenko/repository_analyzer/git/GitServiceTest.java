@@ -12,6 +12,9 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -70,6 +73,43 @@ class GitServiceTest {
             assertEquals(2, countCommits(updatedGit));
             assertEquals("Second commit", updatedGit.log().call().iterator().next().getFullMessage());
         }
+    }
+
+    @Test
+    void replacesIncompleteCloneDirectoryOnRetry() throws Exception {
+        Path sourceDirectory = tempDirectory.resolve("retry-source");
+        Path clonesDirectory = tempDirectory.resolve("retry-clones");
+        createSourceRepository(sourceDirectory);
+
+        String repositoryUrl = sourceDirectory.toUri().toString();
+        String repositoryKey = HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(
+                        (repositoryUrl + "\nmain")
+                                .getBytes(StandardCharsets.UTF_8)
+                )
+        );
+        Path incompleteClone = clonesDirectory.resolve(repositoryKey);
+        Files.createDirectories(incompleteClone);
+        Files.writeString(
+                incompleteClone.resolve("failed-clone.marker"),
+                "incomplete"
+        );
+
+        GitService gitService = new GitService(
+                new DirectoryProperties(clonesDirectory)
+        );
+        Path clonedRepository = gitService.cloneOrUpdateRepository(
+                repositoryUrl,
+                "main"
+        );
+
+        assertTrue(Files.isDirectory(clonedRepository.resolve(".git")));
+        assertFalse(Files.exists(
+                clonedRepository.resolve("failed-clone.marker")
+        ));
+        assertTrue(Files.isRegularFile(
+                clonedRepository.resolve("README.md")
+        ));
     }
 
     @Test

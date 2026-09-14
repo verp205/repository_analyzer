@@ -1,6 +1,7 @@
 package com.ivan_naumenko.repository_analyzer.analysis.service;
 
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
+import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.analysis.repository.AnalysisTaskRepository;
 import com.ivan_naumenko.repository_analyzer.persistence.SqliteWriteCoordinator;
 import org.junit.jupiter.api.Test;
@@ -11,11 +12,16 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -85,6 +91,33 @@ class AnalysisTaskServiceTest {
         );
 
         assertSame(databaseFailure, thrown);
+    }
+
+    @Test
+    void atomicallyCancelsTaskOnlyFromActiveStatus() {
+        AnalysisTaskService service = service();
+        when(repository.updateStatusIfCurrentIn(
+                eq(21),
+                any(Collection.class),
+                eq(AnalysisTaskStatus.CANCELLED),
+                any(LocalDateTime.class)
+        )).thenReturn(1);
+
+        assertTrue(service.cancel(21));
+
+        verify(repository).updateStatusIfCurrentIn(
+                eq(21),
+                org.mockito.ArgumentMatchers.argThat(
+                        statuses -> statuses.containsAll(java.util.List.of(
+                                AnalysisTaskStatus.NEW,
+                                AnalysisTaskStatus.CLONING,
+                                AnalysisTaskStatus.DISCOVERING_COMMITS,
+                                AnalysisTaskStatus.PROCESSING
+                        ))
+                ),
+                eq(AnalysisTaskStatus.CANCELLED),
+                any(LocalDateTime.class)
+        );
     }
 
     private AnalysisTaskService service() {

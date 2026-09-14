@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, type Variants } from "motion/react";
+import { motion, type Variants, useReducedMotion } from "motion/react";
 import {
   type ElementType,
   type HTMLAttributes,
@@ -57,6 +57,7 @@ export function Typewriter({
   },
   ...props
 }: TypewriterProps) {
+  const reduceMotion = useReducedMotion();
   const [displayText, setDisplayText] = useState("");
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -65,6 +66,8 @@ export function Typewriter({
   const texts = useMemo(() => (Array.isArray(text) ? text : [text]), [text]);
 
   useEffect(() => {
+    if (reduceMotion) return;
+
     let timeout: ReturnType<typeof setTimeout>;
     const currentText = texts[currentTextIndex] ?? "";
 
@@ -109,25 +112,28 @@ export function Typewriter({
     currentTextIndex,
     loop,
     initialDelay,
+    reduceMotion,
   ]);
 
   const isTyping =
-    currentIndex < (texts[currentTextIndex]?.length ?? 0) || isDeleting;
+    !reduceMotion &&
+    (currentIndex < (texts[currentTextIndex]?.length ?? 0) || isDeleting);
+  const visibleText = reduceMotion ? (texts[0] ?? "") : displayText;
 
   return (
     <Tag
       className={cn("inline whitespace-pre-wrap tracking-tight", className)}
       {...props}
     >
-      <span>{displayText}</span>
+      <span>{visibleText}</span>
       {showCursor && (
         <motion.span
-          animate="animate"
+          animate={reduceMotion ? undefined : "animate"}
           className={cn(
             cursorClassName,
             hideCursorOnType && isTyping ? "hidden" : "",
           )}
-          initial="initial"
+          initial={reduceMotion ? false : "initial"}
           variants={cursorAnimationVariants as Variants}
         >
           {cursorChar}

@@ -1,56 +1,151 @@
 # Repository Analyzer
 
-Анализатор истории Java-репозиториев с формированием отчёта через LLM.
+Многопоточный анализатор истории Java-репозиториев. Он восстанавливает граф коммитов, исследует diff и структуру Java-кода, группирует изменения и формирует цельный LLM-отчёт для выбранной роли: разработчика, аналитика, специалиста по безопасности, тимлида или руководителя.
 
-## Как запустить
+![Главная страница Repository Analyzer](docs/images/main-page.png)
 
-Понадобятся JDK 21, Node.js и npm.
+## Что происходит во время анализа
 
-1. Запустите backend из корня проекта:
+1. JGit клонирует репозиторий или обновляет его локальную копию.
+2. История коммитов сохраняется в SQLite вместе с parent-связями.
+3. До 10 worker-потоков в случайном порядке извлекают diff и изменённые файлы.
+4. JavaParser выделяет пакеты, классы, методы и признаки ошибок разбора.
+5. Из технических данных собирается компактный контекст, и LLM один раз разбирает каждый коммит в структурированный JSON: суть, категория, уровень риска, ключевые изменения, влияние на поведение, риски и проверки. Разбор не зависит от роли и переиспользуется всеми отчётами задачи. Небольшие коммиты отправляются пакетами, а слияния и обновления lock-файлов описываются без LLM.
+6. Точные показатели считаются без LLM: период, авторы (псевдонимы с общим email склеиваются), активность, часто изменяемые файлы, распределение рисков и характер изменений.
+7. По рабочей копии ветки без LLM собирается состояние кода: описание из README, стек и зависимости, модули, число тестов, HTTP-контроллеры и признаки защиты — Spring Security, отключённый CSRF, CORS `*`, открытый Actuator, секреты в конфигурации и закоммиченные `.env`. Значения секретов в отчёт не попадают, только файл и имя параметра.
+8. Для выбранной роли LLM формирует короткий отчёт по этим фактам и результатам разбора. У каждой роли 3–5 разделов без пересечений; объём зависит от числа коммитов, каждый вывод ссылается на файл или коммит, находки помечаются уровнем (**[Подтверждено]**, **[Проверить]**, **[Высокий]**…), а PDF и Markdown показывают только нужные роли показатели.
+9. Ответы кэшируются по хэшу prompt, временные ошибки inference-сервера повторяются автоматически, а неудачный коммит не останавливает отчёт.
+10. Результаты по коммитам поступают во frontend через SSE; готовый отчёт можно скачать в PDF.
 
-   ```bash
-   ./mvnw spring-boot:run
-   ```
+Анализ идемпотентен: завершённая работа не дублируется, после перезапуска её можно продолжить, а выполнение анализа и формирование отчёта можно остановить.
 
-2. В новом окне терминала запустите frontend:
+## Интерфейс
 
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
+### Сводка анализа
 
-3. Откройте <http://localhost:5173>, вставьте ссылку на Git-репозиторий, укажите ветку, выберите вид отчёта и нажмите «Начать анализ».
+Статус репозитория, прогресс обработки и выбор отдельного отчёта для каждой роли.
 
-По умолчанию используется тестовая LLM-заглушка, поэтому приложение запускается без API-ключа.
+![Сводка анализа репозитория](docs/images/analysis-overview.png)
 
-## Как поменять модель
+### Граф и группы изменений
 
-Настройки находятся в `src/main/resources/application.properties`.
+Точная история parent/merge-связей и смысловая группировка выполненной работы.
 
-Для OpenAI или другого OpenAI-compatible сервера укажите:
+![Граф коммитов и группы изменений](docs/images/commit-graph-and-clusters.png)
 
-```properties
-repository-analyzer.llm.provider=openai-compatible
-repository-analyzer.llm.provider-id=openai
-repository-analyzer.llm.base-url=https://api.openai.com
-repository-analyzer.llm.chat-path=/v1/chat/completions
-repository-analyzer.llm.model=gpt-5.6-sol
-repository-analyzer.llm.api-key=${LLM_API_KEY:}
-repository-analyzer.llm.max-concurrent-requests=2
-```
+### Итоговый отчёт
 
-Чтобы выбрать другую модель, поменяйте значение:
+Заголовок вида «Отчёт по проекту …, ветка …, для разработчика», блок «Главное», ключевые показатели, разделы под выбранную роль, показатели репозитория и список коммитов с фильтром по уровню риска и поиском.
 
-```properties
-repository-analyzer.llm.model=название-модели
-```
+![Итоговый ролевой отчёт](docs/images/final-report.png)
 
-API-ключ не сохраняйте в проекте. Перед запуском передайте его через переменную окружения:
+## Быстрый запуск
+
+Понадобятся:
+
+- JDK 21;
+- Node.js и npm;
+- Ollama с моделью `qwen3:8b` либо доступ к другому OpenAI-compatible API.
+
+По умолчанию проект использует локальную Ollama. Подготовьте модель:
 
 ```bash
-export LLM_API_KEY=ваш-api-ключ
+ollama pull qwen3:8b
+ollama serve
+```
+
+Запустите backend из корня проекта:
+
+```bash
 ./mvnw spring-boot:run
 ```
 
-После изменения настроек перезапустите backend.
+В другом окне терминала запустите frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Откройте [http://localhost:5173](http://localhost:5173), вставьте HTTPS-ссылку на Git-репозиторий, укажите ветку, выберите роль и нажмите **«Начать анализ»**.
+
+Для приватного репозитория раскройте в форме блок доступа и передайте personal access token с правом чтения. Токен используется только для `clone/fetch` и не сохраняется в SQLite.
+
+## Порты и адреса
+
+| Компонент | Адрес | Назначение |
+|---|---|---|
+| Frontend | [localhost:5173](http://localhost:5173) | Пользовательский интерфейс |
+| Backend API | [localhost:8080](http://localhost:8080) | REST API и SSE |
+| Swagger UI | [localhost:8080/swagger-ui/index.html](http://localhost:8080/swagger-ui/index.html) | Документация API |
+| Health check | [localhost:8080/actuator/health](http://localhost:8080/actuator/health) | Состояние backend |
+| Ollama | `localhost:11434` | Локальный LLM API |
+
+SQLite не использует отдельный порт. База создаётся автоматически в `data/repository-analyzer.db`, а локальные копии репозиториев — в `data/repositories`.
+
+## Подключение другой LLM
+
+Настройки находятся в [`src/main/resources/application.properties`](src/main/resources/application.properties). Любой OpenAI-compatible сервер подключается заменой параметров:
+
+```properties
+repository-analyzer.llm.provider=openai-compatible
+repository-analyzer.llm.provider-id=my-provider
+repository-analyzer.llm.base-url=https://api.example.com
+repository-analyzer.llm.chat-path=/v1/chat/completions
+repository-analyzer.llm.model=my-model
+repository-analyzer.llm.api-key=${LLM_API_KEY:}
+```
+
+Перед запуском передайте ключ через окружение и перезапустите backend:
+
+```bash
+export LLM_API_KEY=your-api-key
+./mvnw spring-boot:run
+```
+
+Для локальной Ollama ключ не нужен. Лимиты параллельных запросов, объём контекста и длина ответов также настраиваются в `application.properties`.
+
+## Период отчёта и экспорт
+
+Рядом с выбором роли можно ограничить отчёт периодом: вся история, последний месяц, 3 или 6 месяцев, год, изменения после тега или между двумя тегами (например, отчёт за релиз `v1.1 → v1.2`). Период по дням отсчитывается от самого нового коммита ветки. Для каждой пары «роль + период» хранится отдельный отчёт, а разбор коммитов переиспользуется.
+
+Готовый отчёт экспортируется в PDF или Markdown: файл можно скачать или скопировать текст в буфер и вставить в Confluence или Notion.
+
+## Контекст pull request'ов
+
+Для репозиториев на GitHub и GitLab анализатор подтягивает описание pull/merge request, обсуждение и связанные задачи, к которым относится коммит. Это помогает модели понять, зачем сделано изменение. Результат кэшируется в базе.
+
+Без токена GitHub разрешает около 60 запросов в час, поэтому для больших репозиториев задайте токен с правом чтения:
+
+```bash
+export GITHUB_TOKEN=ghp_...
+export GITLAB_TOKEN=glpat-...   # для GitLab
+export GITLAB_HOSTS=git.company.ru   # self-hosted GitLab, если хост не начинается с gitlab.
+```
+
+При исчерпании лимита загрузка PR приостанавливается до его сброса, а анализ продолжается без этого контекста.
+
+## Безопасность
+
+- Backend слушает только `127.0.0.1`. Для доступа по сети задайте `SERVER_ADDRESS=0.0.0.0` и обязательно `API_TOKEN`. Тот же токен укажите фронтенду в `VITE_API_TOKEN`.
+- Клонируются только HTTPS-ссылки на публичные адреса. Корпоративный Git во внутренней сети разрешается через `ALLOW_PRIVATE_GIT_HOSTS=true`, а список разрешённых хостов задаётся через `ALLOWED_GIT_HOSTS=github.com,gitlab.company.ru`.
+- Запросы к модели ограничены таймаутами (`repository-analyzer.llm.*-timeout-millis`). Остановка отчёта прерывает уже отправленные запросы.
+
+## Проверка качества ответов модели
+
+В `src/test/resources/evaluation/commit-insight-golden.json` лежит эталонный набор из 25 коммитов с ожидаемыми категорией и уровнем риска. После смены модели или промпта прогоните его на реальной LLM:
+
+```bash
+LLM_EVAL_MODEL=qwen3:8b ./mvnw test -Dgroups=llm-evaluation -Dllm.evaluation.excluded-groups=none -Dtest=CommitInsightQualityEvaluationTest -Dsurefire.failIfNoSpecifiedTests=false
+```
+
+Отчёт сохраняется в `target/llm-evaluation/report.md`: доля корректного JSON, точность категории, точность риска (строго и с допуском в один уровень) и список расхождений. Пороги задаются переменными `LLM_EVAL_MIN_JSON`, `LLM_EVAL_MIN_CATEGORY`, `LLM_EVAL_MIN_RISK`, `LLM_EVAL_MIN_RISK_WITHIN_ONE`, адрес сервера — `LLM_EVAL_BASE_URL`, ключ — `LLM_EVAL_API_KEY`. В обычной сборке этот тест не запускается.
+
+## Основной стек
+
+Java 21, Spring Boot, JPA/Hibernate, SQLite, Flyway, JGit, JGraphT, JavaParser, SSE, React, TypeScript, Vite и Tailwind CSS.
+
+---
+
+**dev. Ivan Naumenko · 2026**

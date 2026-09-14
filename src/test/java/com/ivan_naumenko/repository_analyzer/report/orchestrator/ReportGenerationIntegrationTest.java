@@ -10,6 +10,10 @@ import com.ivan_naumenko.repository_analyzer.commit.repository.CommitParentRepos
 import com.ivan_naumenko.repository_analyzer.commit.repository.RepositoryCommitRepository;
 import com.ivan_naumenko.repository_analyzer.commit.service.CommitClaimService;
 import com.ivan_naumenko.repository_analyzer.commit.service.CommitDiscoveryService;
+import com.ivan_naumenko.repository_analyzer.commitinsight.dto.CommitInsightResponse;
+import com.ivan_naumenko.repository_analyzer.commitinsight.model.CommitInsightStatus;
+import com.ivan_naumenko.repository_analyzer.commitinsight.repository.CommitInsightRepository;
+import com.ivan_naumenko.repository_analyzer.commitinsight.service.CommitInsightService;
 import com.ivan_naumenko.repository_analyzer.diff.model.ChangedFile;
 import com.ivan_naumenko.repository_analyzer.diff.model.CommitDiff;
 import com.ivan_naumenko.repository_analyzer.diff.model.FileChangeType;
@@ -19,8 +23,13 @@ import com.ivan_naumenko.repository_analyzer.git.model.GitCommit;
 import com.ivan_naumenko.repository_analyzer.javaanalysis.repository.JavaFileAnalysisRepository;
 import com.ivan_naumenko.repository_analyzer.llm.cache.repository.LlmCacheRepository;
 import com.ivan_naumenko.repository_analyzer.report.dto.AnalysisReportResponse;
+import com.ivan_naumenko.repository_analyzer.report.facts.dto.RepositoryFactsResponse;
+import com.ivan_naumenko.repository_analyzer.report.facts.service.RepositoryFactsService;
 import com.ivan_naumenko.repository_analyzer.report.model.AnalysisReport;
+import com.ivan_naumenko.repository_analyzer.forge.repository.CommitPullRequestRepository;
 import com.ivan_naumenko.repository_analyzer.report.model.ReportAudience;
+import com.ivan_naumenko.repository_analyzer.report.model.ReportPeriod;
+import com.ivan_naumenko.repository_analyzer.report.model.ReportPeriodType;
 import com.ivan_naumenko.repository_analyzer.report.model.ReportStatus;
 import com.ivan_naumenko.repository_analyzer.report.repository.AnalysisReportRepository;
 import com.ivan_naumenko.repository_analyzer.report.service.AnalysisReportService;
@@ -39,6 +48,8 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -70,7 +81,16 @@ class ReportGenerationIntegrationTest {
     private ReportOrchestrator orchestrator;
 
     @Autowired
+    private CommitInsightService insightService;
+
+    @Autowired
+    private RepositoryFactsService factsService;
+
+    @Autowired
     private AnalysisReportRepository reportRepository;
+
+    @Autowired
+    private CommitInsightRepository insightRepository;
 
     @Autowired
     private LlmCacheRepository cacheRepository;
@@ -101,9 +121,14 @@ class ReportGenerationIntegrationTest {
         registry.add("repository-analyzer.llm.provider", () -> "stub");
     }
 
+    @Autowired
+    private CommitPullRequestRepository pullRequestRepository;
+
     @BeforeEach
     void clearDatabase() {
         reportRepository.deleteAll();
+        insightRepository.deleteAll();
+        pullRequestRepository.deleteAll();
         cacheRepository.deleteAll();
         javaAnalysisRepository.deleteAll();
         diffRepository.deleteAll();
@@ -113,7 +138,7 @@ class ReportGenerationIntegrationTest {
     }
 
     @Test
-    void buildsAndCachesReportFromStoredCommitAnalysis() throws Exception {
+    void buildsRoleReportFromStructuredCommitInsights() throws Exception {
         AnalysisTask task = createCompletedTask();
         AnalysisReport report = reportService.createOrGet(
                 task.getId(),
@@ -130,10 +155,82 @@ class ReportGenerationIntegrationTest {
         assertEquals(ReportStatus.COMPLETED, response.status());
         assertEquals(1, response.totalCommits());
         assertEquals(1, response.processedCommits());
+        assertEquals("https://example.com/report.git", response.repositoryUrl());
+        assertEquals("main", response.branch());
         assertNotNull(response.content());
-        assertTrue(response.content().contains(COMMIT_HASH));
-        assertTrue(response.content().contains("Демонстрационный LLM-ответ"));
-        assertEquals(1, cacheRepository.count());
+        assertTrue(response.content().startsWith("## Главное"));
+        assertFalse(response.content().contains("# Итоговый"));
+
+        List<CommitInsightResponse> insights = insightService.findForTask(task.getId());
+        assertEquals(1, insights.size());
+        assertEquals(COMMIT_HASH, insights.getFirst().commitHash());
+        assertEquals(CommitInsightStatus.ANALYZED, insights.getFirst().status());
+        assertTrue(insights.getFirst().summary().contains("Демонстрационный"));
+
+        RepositoryFactsResponse facts = factsService.build(task.getId());
+        assertEquals("report", facts.repositoryName());
+        assertEquals(1, facts.totalCommits());
+        assertEquals(1, facts.insightCommits());
+        assertEquals(2, facts.addedLines());
+        assertEquals(1, facts.risks().low());
+
+        assertEquals(2, cacheRepository.count());
+    }
+
+    @Test
+    void reusesCommitInsightsAcrossAudiences() throws Exception {
+        AnalysisTask task = createCompletedTask();
+        AnalysisReport developer = reportService.createOrGet(
+                task.getId(),
+                ReportAudience.DEVELOPER
+        );
+        AnalysisReport security = reportService.createOrGet(
+                task.getId(),
+                ReportAudience.SECURITY
+        );
+
+        assertNotEquals(developer.getId(), security.getId());
+        assertTrue(orchestrator.start(developer.getId()));
+        assertTrue(orchestrator.start(security.getId()));
+
+        AnalysisReportResponse developerResponse = waitForCompletion(
+                developer.getId(),
+                Duration.ofSeconds(5)
+        );
+        AnalysisReportResponse securityResponse = waitForCompletion(
+                security.getId(),
+                Duration.ofSeconds(5)
+        );
+
+        assertEquals(ReportStatus.COMPLETED, developerResponse.status());
+        assertEquals(ReportStatus.COMPLETED, securityResponse.status());
+        assertEquals(ReportAudience.DEVELOPER, developerResponse.audience());
+        assertEquals(ReportAudience.SECURITY, securityResponse.audience());
+        assertEquals(1, insightRepository.count());
+        // Один общий анализ коммита и по одному ролевому синтезу.
+        assertEquals(3, cacheRepository.count());
+    }
+
+    @Test
+    void keepsSeparateReportsPerPeriod() throws Exception {
+        AnalysisTask task = createCompletedTask();
+        ReportPeriod lastMonth = new ReportPeriod(ReportPeriodType.LAST_DAYS, 30, null, null);
+        AnalysisReport wholeHistory = reportService.createOrGet(task.getId(), ReportAudience.ANALYST);
+        AnalysisReport monthly = reportService.createOrGet(task.getId(), ReportAudience.ANALYST, lastMonth);
+
+        assertNotEquals(wholeHistory.getId(), monthly.getId());
+        assertEquals(
+                monthly.getId(),
+                reportService.createOrGet(task.getId(), ReportAudience.ANALYST, lastMonth).getId()
+        );
+
+        assertTrue(orchestrator.start(monthly.getId()));
+        AnalysisReportResponse response = waitForCompletion(monthly.getId(), Duration.ofSeconds(5));
+
+        assertEquals(ReportStatus.COMPLETED, response.status());
+        assertEquals(ReportPeriodType.LAST_DAYS, response.period().type());
+        assertEquals("последний месяц истории", response.period().label());
+        assertEquals(1, response.totalCommits());
     }
 
     private AnalysisTask createCompletedTask() {

@@ -1,4 +1,5 @@
-import { Check, LoaderCircle, X } from "lucide-react";
+import { Check, LoaderCircle, Square, X } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import type {
   AnalysisProgress,
   AnalysisReport,
@@ -14,7 +15,12 @@ interface AnalysisTimelineProps {
   insightsReady: boolean;
 }
 
-type StepState = "waiting" | "active" | "complete" | "failed";
+type StepState =
+  | "waiting"
+  | "active"
+  | "complete"
+  | "failed"
+  | "cancelled";
 
 export function AnalysisTimeline({
   task,
@@ -22,6 +28,7 @@ export function AnalysisTimeline({
   report,
   insightsReady,
 }: AnalysisTimelineProps) {
+  const reduceMotion = useReducedMotion();
   const technicalStatus = task?.status;
   const steps = [
     {
@@ -48,15 +55,19 @@ export function AnalysisTimeline({
     },
     {
       title: "Формирование отчёта",
-      detail: report?.totalCommits
-        ? `Учтено коммитов: ${report.processedCommits} из ${report.totalCommits}`
-        : "Отчёт с учётом выбранной роли пользователя",
+      detail: !report?.totalCommits
+        ? "Отчёт с учётом выбранной роли пользователя"
+        : report.status === "PROCESSING" &&
+            report.processedCommits >= report.totalCommits
+          ? "Формирование выводов для выбранной роли"
+          : `Разобрано коммитов: ${report.processedCommits} из ${report.totalCommits}`,
       state: stateFor(5),
     },
   ];
 
   function stateFor(step: number): StepState {
     if (!task) return "waiting";
+    if (technicalStatus === "CANCELLED") return "waiting";
     if (technicalStatus === "FAILED" && step <= 3) {
       return step === 3 ? "failed" : "complete";
     }
@@ -81,6 +92,7 @@ export function AnalysisTimeline({
       return technicalStatus === "COMPLETED" ? "active" : "waiting";
     }
     if (report?.status === "FAILED") return "failed";
+    if (report?.status === "CANCELLED") return "cancelled";
     if (report?.status === "COMPLETED") return "complete";
     if (report?.status === "PROCESSING" || report?.status === "NEW") {
       return "active";
@@ -108,7 +120,17 @@ export function AnalysisTimeline({
 
       <ol>
         {steps.map((step, index) => (
-          <li className="relative flex gap-4 pb-5 last:pb-0" key={step.title}>
+          <motion.li
+            animate={{ opacity: 1, x: 0 }}
+            className="relative flex gap-4 pb-5 last:pb-0"
+            initial={reduceMotion ? false : { opacity: 0, x: -10 }}
+            key={step.title}
+            transition={{
+              delay: reduceMotion ? 0 : index * 0.055,
+              duration: reduceMotion ? 0 : 0.32,
+              ease: [0.22, 1, 0.36, 1],
+            }}
+          >
             {index < steps.length - 1 && (
               <span className="absolute left-[15px] top-8 h-[calc(100%-1rem)] w-px bg-line" />
             )}
@@ -118,19 +140,23 @@ export function AnalysisTimeline({
                 step.state === "complete" &&
                   "border-accent bg-accent text-accent-contrast",
                 step.state === "active" &&
-                  "border-accent bg-panel text-accent shadow-[0_0_0_4px_var(--accent-soft)]",
+                  "analysis-step-active border-accent bg-panel text-accent shadow-[0_0_0_4px_var(--accent-soft)]",
                 step.state === "waiting" &&
                   "border-line bg-panel text-muted",
                 step.state === "failed" &&
                   "border-red-400 bg-red-50 text-red-600 dark:bg-red-950/30",
+                step.state === "cancelled" &&
+                  "border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300",
               )}
             >
               {step.state === "complete" ? (
                 <Check className="size-4" />
               ) : step.state === "active" ? (
-                <LoaderCircle className="size-4 animate-spin" />
+                <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />
               ) : step.state === "failed" ? (
                 <X className="size-4" />
+              ) : step.state === "cancelled" ? (
+                <Square className="size-3 fill-current" />
               ) : (
                 index + 1
               )}
@@ -141,13 +167,13 @@ export function AnalysisTimeline({
               {index === 2 && step.state === "active" && progress && (
                 <div className="mt-2 h-1.5 w-full max-w-52 overflow-hidden rounded-full bg-accent-soft">
                   <div
-                    className="h-full rounded-full bg-accent transition-[width] duration-500"
+                    className="progress-fill h-full rounded-full bg-accent transition-[width] duration-500 motion-reduce:transition-none"
                     style={{ width: `${percentage}%` }}
                   />
                 </div>
               )}
             </div>
-          </li>
+          </motion.li>
         ))}
       </ol>
     </section>

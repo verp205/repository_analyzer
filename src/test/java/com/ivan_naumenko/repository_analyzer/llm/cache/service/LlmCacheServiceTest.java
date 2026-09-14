@@ -170,16 +170,6 @@ class LlmCacheServiceTest {
                         ReportAudience.ANALYST
                 )
         );
-        assertThrows(
-                NullPointerException.class,
-                () -> service().saveResponse(
-                        promptHash,
-                        CACHE_NAMESPACE,
-                        PROMPT,
-                        RESPONSE,
-                        null
-                )
-        );
     }
 
     @Test

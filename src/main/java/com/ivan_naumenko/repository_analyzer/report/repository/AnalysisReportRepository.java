@@ -11,15 +11,17 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.List;
 
 public interface AnalysisReportRepository
         extends JpaRepository<AnalysisReport, Integer> {
 
-    Optional<AnalysisReport> findByAnalysisTask_IdAndAudience(
+    Optional<AnalysisReport> findByAnalysisTask_IdAndAudienceAndPeriodKey(
             Integer taskId,
-            ReportAudience audience
+            ReportAudience audience,
+            String periodKey
     );
 
     List<AnalysisReport> findAllByAnalysisTask_IdOrderByCreatedAtAsc(
@@ -27,10 +29,26 @@ public interface AnalysisReportRepository
     );
 
     @Query("""
+            SELECT report.id
+            FROM AnalysisReport report
+            WHERE report.status = :status
+            ORDER BY report.createdAt ASC, report.id ASC
+            """)
+    List<Integer> findIdsByStatus(
+            @Param("status") ReportStatus status
+    );
+
+    @Query("""
             SELECT new com.ivan_naumenko.repository_analyzer.report.model.ReportGenerationData(
                 report.id,
                 report.analysisTask.id,
-                report.audience
+                report.audience,
+                report.analysisTask.repositoryUrl,
+                report.analysisTask.branch,
+                report.periodType,
+                report.periodDays,
+                report.periodFrom,
+                report.periodTo
             )
             FROM AnalysisReport report
             WHERE report.id = :reportId
@@ -39,6 +57,25 @@ public interface AnalysisReportRepository
     Optional<ReportGenerationData> findGenerationData(
             @Param("reportId") Integer reportId,
             @Param("status") ReportStatus status
+    );
+
+    @Query("""
+            SELECT new com.ivan_naumenko.repository_analyzer.report.model.ReportGenerationData(
+                report.id,
+                report.analysisTask.id,
+                report.audience,
+                report.analysisTask.repositoryUrl,
+                report.analysisTask.branch,
+                report.periodType,
+                report.periodDays,
+                report.periodFrom,
+                report.periodTo
+            )
+            FROM AnalysisReport report
+            WHERE report.id = :reportId
+            """)
+    Optional<ReportGenerationData> findGenerationDataById(
+            @Param("reportId") Integer reportId
     );
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
@@ -57,6 +94,29 @@ public interface AnalysisReportRepository
             @Param("newStatus") ReportStatus newStatus,
             @Param("updatedAt") LocalDateTime updatedAt
     );
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query("""
+            UPDATE AnalysisReport report
+            SET report.status = :newStatus,
+                report.totalCommits = 0,
+                report.processedCommits = 0,
+                report.content = null,
+                report.lastError = null,
+                report.updatedAt = :updatedAt
+            WHERE report.id = :reportId
+              AND report.status IN :expectedStatuses
+            """)
+    int resetForRetry(
+            @Param("reportId") Integer reportId,
+            @Param("expectedStatuses")
+            Collection<ReportStatus> expectedStatuses,
+            @Param("newStatus") ReportStatus newStatus,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    boolean existsByIdAndStatus(Integer reportId, ReportStatus status);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Transactional
@@ -81,7 +141,6 @@ public interface AnalysisReportRepository
     @Query("""
             UPDATE AnalysisReport report
             SET report.processedCommits = :processedCommits,
-                report.content = :content,
                 report.updatedAt = :updatedAt
             WHERE report.id = :reportId
               AND report.status = :status
@@ -91,7 +150,6 @@ public interface AnalysisReportRepository
             @Param("reportId") Integer reportId,
             @Param("status") ReportStatus status,
             @Param("processedCommits") int processedCommits,
-            @Param("content") String content,
             @Param("updatedAt") LocalDateTime updatedAt
     );
 

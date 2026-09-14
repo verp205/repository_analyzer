@@ -40,6 +40,7 @@
         <jgrapht.version>1.5.2</jgrapht.version>
         <javaparser.version>3.28.2</javaparser.version>
         <springdoc.version>3.0.3</springdoc.version>
+        <llm.evaluation.excluded-groups>llm-evaluation</llm.evaluation.excluded-groups>
     </properties>
 
     <dependencies>
@@ -169,6 +170,8 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <argLine>--enable-native-access=ALL-UNNAMED -XX:+EnableDynamicAgentLoading</argLine>
+                    <!-- Оценка качества на реальной LLM запускается отдельно, см. README. -->
+                    <excludedGroups>${llm.evaluation.excluded-groups}</excludedGroups>
                 </configuration>
             </plugin>
         </plugins>
