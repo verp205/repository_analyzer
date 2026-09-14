@@ -10,6 +10,7 @@ import com.ivan_naumenko.repository_analyzer.git.model.GitCommit;
 import com.ivan_naumenko.repository_analyzer.git.model.GitCredentials;
 import com.ivan_naumenko.repository_analyzer.git.service.GitService;
 import com.ivan_naumenko.repository_analyzer.persistence.SqliteWriteCoordinator;
+import com.ivan_naumenko.repository_analyzer.security.RepositoryUrlPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -36,6 +37,7 @@ public class AnalysisOrchestrator {
     private final AnalysisProperties analysisProperties;
     private final SqliteWriteCoordinator writeCoordinator;
     private final ExecutorService analysisExecutor;
+    private final RepositoryUrlPolicy repositoryUrlPolicy;
     private final ConcurrentHashMap<Integer, AtomicInteger>
             activePreparations = new ConcurrentHashMap<>();
 
@@ -47,8 +49,10 @@ public class AnalysisOrchestrator {
             AnalysisProperties analysisProperties,
             SqliteWriteCoordinator writeCoordinator,
             @Qualifier("analysisExecutor")
-            ExecutorService analysisExecutor
+            ExecutorService analysisExecutor,
+            RepositoryUrlPolicy repositoryUrlPolicy
     ) {
+        this.repositoryUrlPolicy = repositoryUrlPolicy;
         this.analysisTaskService = analysisTaskService;
         this.gitService = gitService;
         this.commitDiscoveryService = commitDiscoveryService;
@@ -107,6 +111,8 @@ public class AnalysisOrchestrator {
     ) {
         try {
             AnalysisTask task = analysisTaskService.getById(taskId);
+            // Повторная проверка перед сетевым доступом: DNS мог измениться с момента создания задачи.
+            repositoryUrlPolicy.validate(task.getRepositoryUrl());
 
             if (credentials == null) {
                 gitService.cloneOrUpdateRepository(

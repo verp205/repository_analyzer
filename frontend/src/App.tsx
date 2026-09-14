@@ -29,9 +29,11 @@ import {
   type AnalysisRequest,
 } from "@/components/RepositoryForm";
 import { ReportPanel } from "@/components/ReportPanel";
+import { ReportPeriodPicker } from "@/components/report/ReportPeriodPicker";
 import { AudienceSelect } from "@/components/ui/audience-select";
 import { FlowHoverButton } from "@/components/ui/flow-hover-button";
 import { api } from "@/lib/api";
+import { ALL_TIME_PERIOD, periodKey } from "@/lib/reportPeriod";
 import type {
   AnalysisProgress,
   AnalysisReport,
@@ -39,8 +41,13 @@ import type {
   AnalysisTaskStatus,
   CommitClusters,
   CommitGraph,
+  CommitInsight,
+  GitTag,
   ReportAudience,
   ReportEvent,
+  ReportPeriod,
+  ReportStatus,
+  RepositoryFacts,
 } from "@/lib/types";
 import { repositoryName } from "@/lib/utils";
 
@@ -55,6 +62,20 @@ type ThemeRipple = {
 };
 
 const hiddenHistoryKey = "repository-analyzer-hidden-history";
+const terminalReportStatuses: ReportStatus[] = [
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+];
+const reportEventNames = [
+  "snapshot",
+  "started",
+  "progress",
+  "synthesis",
+  "completed",
+  "failed",
+  "cancelled",
+];
 const cancellableTaskStatuses: AnalysisTaskStatus[] = [
   "NEW",
   "CLONING",
@@ -107,8 +128,11 @@ export default function App() {
   const [graph, setGraph] = useState<CommitGraph | null>(null);
   const [clusters, setClusters] = useState<CommitClusters | null>(null);
   const [report, setReport] = useState<AnalysisReport | null>(null);
-  const [liveContent, setLiveContent] = useState("");
+  const [facts, setFacts] = useState<RepositoryFacts | null>(null);
+  const [commitInsights, setCommitInsights] = useState<CommitInsight[]>([]);
   const [audience, setAudience] = useState<ReportAudience>("DEVELOPER");
+  const [period, setPeriod] = useState<ReportPeriod>(ALL_TIME_PERIOD);
+  const [tags, setTags] = useState<GitTag[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancellingReport, setCancellingReport] = useState(false);
@@ -117,7 +141,6 @@ export default function App() {
     useState<ConnectionStatus>("checking");
   const reportRequestKey = useRef("");
   const restartingRecoveredReportId = useRef<number | null>(null);
-  const lastLiveCommit = useRef(0);
   const taskId = task?.id ?? null;
   const taskStatus = task?.status ?? null;
   const reportId = report?.id ?? null;
@@ -224,7 +247,7 @@ export default function App() {
 
   useEffect(() => {
     if (!taskId || taskStatus !== "COMPLETED") return;
-    const key = `${taskId}:${audience}`;
+    const key = `${taskId}:${audience}:${periodKey(period)}`;
     if (reportRequestKey.current === key) return;
     reportRequestKey.current = key;
 
@@ -234,14 +257,19 @@ export default function App() {
         const [nextGraph, nextClusters, nextReport] = await Promise.all([
           api.getGraph(taskId),
           api.getClusters(taskId),
-          api.createReport(taskId, audience),
+          api.createReport(taskId, audience, period),
+        ]);
+        // Показатели и коммиты — в границах периода отчёта.
+        const [nextFacts, nextInsights] = await Promise.all([
+          api.getReportFacts(nextReport.id),
+          api.getReportCommitInsights(nextReport.id),
         ]);
         if (disposed) return;
         setGraph(nextGraph);
         setClusters(nextClusters);
+        setFacts(nextFacts);
+        setCommitInsights(nextInsights);
         setReport(nextReport);
-        setLiveContent(nextReport.content || "");
-        lastLiveCommit.current = nextReport.processedCommits;
       } catch (caught) {
         if (!disposed) {
           reportRequestKey.current = "";
@@ -254,13 +282,33 @@ export default function App() {
     return () => {
       disposed = true;
     };
-  }, [taskId, taskStatus, audience]);
+  }, [taskId, taskStatus, audience, period]);
+
+  useEffect(() => {
+    if (!taskId || taskStatus !== "COMPLETED") return;
+    let disposed = false;
+    void api
+      .getTags(taskId)
+      .then((nextTags) => {
+        if (!disposed) setTags(nextTags);
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+    };
+  }, [taskId, taskStatus]);
 
   const refreshReport = useCallback(async (reportId: number) => {
     const fresh = await api.getReport(reportId);
     setReport(fresh);
-    if (fresh.content) setLiveContent(fresh.content);
-    lastLiveCommit.current = fresh.processedCommits;
+    if (terminalReportStatuses.includes(fresh.status)) {
+      const [nextFacts, nextInsights] = await Promise.all([
+        api.getReportFacts(fresh.id),
+        api.getReportCommitInsights(fresh.id),
+      ]);
+      setFacts(nextFacts);
+      setCommitInsights(nextInsights);
+    }
     return fresh;
   }, []);
 
@@ -277,15 +325,13 @@ export default function App() {
     restartingRecoveredReportId.current = report.id;
     let disposed = false;
     void api
-      .createReport(report.analysisTaskId, report.audience)
+      .createReport(report.analysisTaskId, report.audience, report.period)
       .then((restarted) => {
         if (disposed) return;
         if (restarted.status !== "NEW") {
           restartingRecoveredReportId.current = null;
         }
         setReport(restarted);
-        setLiveContent(restarted.content || "");
-        lastLiveCommit.current = restarted.processedCommits;
       })
       .catch((caught) => {
         if (disposed) return;
@@ -309,10 +355,12 @@ export default function App() {
     }
 
     const source = new EventSource(api.reportEventsUrl(reportId));
+    let fallbackTimer: ReturnType<typeof setInterval> | null = null;
+
     const handleEvent = (message: MessageEvent<string>) => {
       const event = JSON.parse(message.data) as ReportEvent;
       setReport((current) =>
-        current
+        current && current.id === event.reportId
           ? {
               ...current,
               processedCommits: event.processedCommits,
@@ -321,42 +369,36 @@ export default function App() {
           : current,
       );
 
-      if (event.type === "SUMMARY" && event.contentChunk) {
-        setLiveContent(event.contentChunk);
-        lastLiveCommit.current = 0;
+      if (event.commits?.length) {
+        setCommitInsights((current) => mergeInsights(current, event.commits));
       }
-      if (
-        event.type === "PROGRESS" &&
-        event.contentChunk &&
-        event.processedCommits > lastLiveCommit.current
-      ) {
-        setLiveContent((current) => current + event.contentChunk);
-        lastLiveCommit.current = event.processedCommits;
-      }
-      if (
-        event.type === "COMPLETED" ||
-        event.type === "FAILED" ||
-        event.type === "CANCELLED"
-      ) {
-        void refreshReport(event.reportId);
+      if (event.type === "SNAPSHOT") {
+        // После (пере)подключения догружаем то, что могло прийти без нас.
+        void refreshReport(event.reportId).catch(() => undefined);
+        void api
+          .getReportCommitInsights(event.reportId)
+          .then(setCommitInsights)
+          .catch(() => undefined);
+      } else if (event.status && terminalReportStatuses.includes(event.status)) {
+        void refreshReport(event.reportId).catch(() => undefined);
       }
     };
 
-    [
-      "snapshot",
-      "summary",
-      "progress",
-      "completed",
-      "failed",
-      "cancelled",
-    ].forEach((eventName) => source.addEventListener(eventName, handleEvent));
+    reportEventNames.forEach((eventName) =>
+      source.addEventListener(eventName, handleEvent),
+    );
 
-    const timer = setInterval(() => {
-      void refreshReport(reportId).catch(() => undefined);
-    }, 1500);
+    // Опрос нужен только если SSE-соединение закрыто окончательно.
+    source.onerror = () => {
+      if (source.readyState === EventSource.CLOSED && !fallbackTimer) {
+        fallbackTimer = setInterval(() => {
+          void refreshReport(reportId).catch(() => undefined);
+        }, 4000);
+      }
+    };
 
     return () => {
-      clearInterval(timer);
+      if (fallbackTimer) clearInterval(fallbackTimer);
       source.close();
     };
   }, [reportId, reportStatus, refreshReport]);
@@ -365,13 +407,15 @@ export default function App() {
     setSubmitting(true);
     setError(null);
     setAudience(request.audience);
+    setPeriod(ALL_TIME_PERIOD);
+    setTags([]);
     setProgress(null);
     setGraph(null);
     setClusters(null);
     setReport(null);
-    setLiveContent("");
+    setFacts(null);
+    setCommitInsights([]);
     reportRequestKey.current = "";
-    lastLiveCommit.current = 0;
 
     try {
       const created = await api.createTask(
@@ -404,6 +448,8 @@ export default function App() {
       setGraph(null);
       setClusters(null);
       setReport(null);
+      setFacts(null);
+      setCommitInsights([]);
       reportRequestKey.current = "";
     } catch (caught) {
       setError(errorMessage(caught));
@@ -434,8 +480,6 @@ export default function App() {
     try {
       const retried = await api.retryReport(report.id);
       setReport(retried);
-      setLiveContent("");
-      lastLiveCommit.current = 0;
     } catch (caught) {
       setError(errorMessage(caught));
     }
@@ -448,7 +492,6 @@ export default function App() {
     try {
       const cancelled = await api.cancelReport(report.id);
       setReport(cancelled);
-      if (cancelled.content) setLiveContent(cancelled.content);
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -458,11 +501,14 @@ export default function App() {
 
   async function openTask(selected: AnalysisTask) {
     setTask(selected);
+    setPeriod(ALL_TIME_PERIOD);
+    setTags([]);
     setProgress(null);
     setGraph(null);
     setClusters(null);
     setReport(null);
-    setLiveContent("");
+    setFacts(null);
+    setCommitInsights([]);
     setError(null);
     reportRequestKey.current = "";
     try {
@@ -476,9 +522,15 @@ export default function App() {
     if (nextAudience === audience) return;
     setAudience(nextAudience);
     setReport(null);
-    setLiveContent("");
     reportRequestKey.current = "";
-    lastLiveCommit.current = 0;
+  }
+
+  function selectReportPeriod(nextPeriod: ReportPeriod) {
+    if (periodKey(nextPeriod) === periodKey(period)) return;
+    setPeriod(nextPeriod);
+    setReport(null);
+    setError(null);
+    reportRequestKey.current = "";
   }
 
   function toggleTheme(event: ReactMouseEvent<HTMLButtonElement>) {
@@ -637,7 +689,7 @@ export default function App() {
 
         <motion.main
           animate={{ opacity: 1 }}
-          className="relative overflow-hidden px-4 py-5 sm:px-7 sm:py-7 xl:px-12 xl:py-10"
+          className="relative overflow-x-clip px-4 py-5 sm:px-7 sm:py-7 xl:px-12 xl:py-10"
           initial={reduceMotion ? false : { opacity: 0 }}
           transition={{ duration: reduceMotion ? 0 : 0.5 }}
         >
@@ -763,8 +815,17 @@ export default function App() {
                                 placement="bottom"
                                 value={audience}
                               />
+                              <p className="mb-2 mt-4 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">
+                                Период
+                              </p>
+                              <ReportPeriodPicker
+                                key={task.id}
+                                onChange={selectReportPeriod}
+                                tags={tags}
+                                value={period}
+                              />
                               <p className="mt-2 text-[10px] leading-4 text-muted">
-                                Для каждой роли создаётся отдельный отчёт.
+                                Для каждой роли и периода создаётся отдельный отчёт.
                               </p>
                             </div>
                           )}
@@ -859,7 +920,8 @@ export default function App() {
 
                 <ReportPanel
                   cancelling={cancellingReport}
-                  liveContent={liveContent}
+                  commits={commitInsights}
+                  facts={facts}
                   onCancel={cancelReport}
                   onRetry={retryReport}
                   report={report}
@@ -915,4 +977,10 @@ export default function App() {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Произошла непредвиденная ошибка";
+}
+
+function mergeInsights(current: CommitInsight[], incoming: CommitInsight[]) {
+  const byCommit = new Map(current.map((item) => [item.commitId, item]));
+  incoming.forEach((item) => byCommit.set(item.commitId, item));
+  return [...byCommit.values()].sort((left, right) => left.position - right.position);
 }

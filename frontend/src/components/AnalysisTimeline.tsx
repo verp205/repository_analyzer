@@ -55,9 +55,12 @@ export function AnalysisTimeline({
     },
     {
       title: "Формирование отчёта",
-      detail: report?.totalCommits
-        ? `Учтено коммитов: ${report.processedCommits} из ${report.totalCommits}`
-        : "Отчёт с учётом выбранной роли пользователя",
+      detail: !report?.totalCommits
+        ? "Отчёт с учётом выбранной роли пользователя"
+        : report.status === "PROCESSING" &&
+            report.processedCommits >= report.totalCommits
+          ? "Формирование выводов для выбранной роли"
+          : `Разобрано коммитов: ${report.processedCommits} из ${report.totalCommits}`,
       state: stateFor(5),
     },
   ];

@@ -18,9 +18,10 @@ import java.util.List;
 public interface AnalysisReportRepository
         extends JpaRepository<AnalysisReport, Integer> {
 
-    Optional<AnalysisReport> findByAnalysisTask_IdAndAudience(
+    Optional<AnalysisReport> findByAnalysisTask_IdAndAudienceAndPeriodKey(
             Integer taskId,
-            ReportAudience audience
+            ReportAudience audience,
+            String periodKey
     );
 
     List<AnalysisReport> findAllByAnalysisTask_IdOrderByCreatedAtAsc(
@@ -43,7 +44,11 @@ public interface AnalysisReportRepository
                 report.analysisTask.id,
                 report.audience,
                 report.analysisTask.repositoryUrl,
-                report.analysisTask.branch
+                report.analysisTask.branch,
+                report.periodType,
+                report.periodDays,
+                report.periodFrom,
+                report.periodTo
             )
             FROM AnalysisReport report
             WHERE report.id = :reportId
@@ -52,6 +57,25 @@ public interface AnalysisReportRepository
     Optional<ReportGenerationData> findGenerationData(
             @Param("reportId") Integer reportId,
             @Param("status") ReportStatus status
+    );
+
+    @Query("""
+            SELECT new com.ivan_naumenko.repository_analyzer.report.model.ReportGenerationData(
+                report.id,
+                report.analysisTask.id,
+                report.audience,
+                report.analysisTask.repositoryUrl,
+                report.analysisTask.branch,
+                report.periodType,
+                report.periodDays,
+                report.periodFrom,
+                report.periodTo
+            )
+            FROM AnalysisReport report
+            WHERE report.id = :reportId
+            """)
+    Optional<ReportGenerationData> findGenerationDataById(
+            @Param("reportId") Integer reportId
     );
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
@@ -117,7 +141,6 @@ public interface AnalysisReportRepository
     @Query("""
             UPDATE AnalysisReport report
             SET report.processedCommits = :processedCommits,
-                report.content = :content,
                 report.updatedAt = :updatedAt
             WHERE report.id = :reportId
               AND report.status = :status
@@ -127,7 +150,6 @@ public interface AnalysisReportRepository
             @Param("reportId") Integer reportId,
             @Param("status") ReportStatus status,
             @Param("processedCommits") int processedCommits,
-            @Param("content") String content,
             @Param("updatedAt") LocalDateTime updatedAt
     );
 

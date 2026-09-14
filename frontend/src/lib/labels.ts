@@ -2,6 +2,7 @@ import type {
   AnalysisTaskStatus,
   ReportAudience,
   ReportStatus,
+  RiskLevel,
 } from "@/lib/types";
 
 const taskStatusLabels: Record<AnalysisTaskStatus, string> = {
@@ -30,6 +31,22 @@ const audienceLabels: Record<ReportAudience, string> = {
   DIRECTOR: "Директор",
 };
 
+const audienceReaderLabels: Record<ReportAudience, string> = {
+  DEVELOPER: "разработчика",
+  ANALYST: "аналитика",
+  SECURITY: "специалиста по безопасности",
+  TEAM_LEAD: "тимлида",
+  DIRECTOR: "директора",
+};
+
+const riskLabels: Record<RiskLevel, string> = {
+  HIGH: "Высокий",
+  MEDIUM: "Средний",
+  LOW: "Низкий",
+  NONE: "Нет риска",
+  UNKNOWN: "Не определён",
+};
+
 export function taskStatusLabel(status: AnalysisTaskStatus) {
   return taskStatusLabels[status];
 }
@@ -40,4 +57,16 @@ export function reportStatusLabel(status: ReportStatus) {
 
 export function audienceLabel(audience: ReportAudience) {
   return audienceLabels[audience];
+}
+
+export function riskLabel(risk: RiskLevel) {
+  return riskLabels[risk];
+}
+
+export function reportTitle(
+  projectName: string,
+  branch: string,
+  audience: ReportAudience,
+) {
+  return `Отчёт по проекту «${projectName}», ветка «${branch}», для ${audienceReaderLabels[audience]}`;
 }

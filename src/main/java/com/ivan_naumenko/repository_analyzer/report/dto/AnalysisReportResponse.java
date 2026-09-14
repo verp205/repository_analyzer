@@ -8,6 +8,9 @@ import java.time.LocalDateTime;
 public record AnalysisReportResponse(
         Integer id,
         Integer analysisTaskId,
+        String repositoryUrl,
+        String branch,
+        ReportPeriodResponse period,
         ReportAudience audience,
         ReportStatus status,
         int totalCommits,

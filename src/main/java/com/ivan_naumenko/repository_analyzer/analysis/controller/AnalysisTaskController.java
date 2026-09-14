@@ -12,6 +12,7 @@ import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisRecoverySe
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskService;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisProgressService;
 import com.ivan_naumenko.repository_analyzer.git.model.GitCredentials;
+import com.ivan_naumenko.repository_analyzer.security.RepositoryUrlPolicy;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -35,6 +36,7 @@ public class AnalysisTaskController {
     private final AnalysisRecoveryService analysisRecoveryService;
     private final TaskMapper taskMapper;
     private final AnalysisOrchestrator orchestrator;
+    private final RepositoryUrlPolicy repositoryUrlPolicy;
 
     @GetMapping
     public List<AnalysisTaskResponse> getAnalysisTasks() {
@@ -56,7 +58,8 @@ public class AnalysisTaskController {
     @PostMapping
     public ResponseEntity<AnalysisTaskResponse> createOrGetTask(@Valid @RequestBody CreateAnalysisTaskRequest request) {
 
-        AnalysisTask task = analysisTaskService.createOrGet(request.repositoryUrl(), request.branch());
+        String repositoryUrl = repositoryUrlPolicy.validate(request.repositoryUrl());
+        AnalysisTask task = analysisTaskService.createOrGet(repositoryUrl, request.branch());
 
         GitCredentials credentials = GitCredentials.from(
                 request.gitUsername(),

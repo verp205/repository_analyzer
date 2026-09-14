@@ -35,10 +35,11 @@ public class ReportEventService {
                 new ReportEvent(
                         "CONNECTED",
                         reportId,
+                        null,
                         0,
                         0,
                         "SSE-подписка установлена",
-                        null,
+                        List.of(),
                         LocalDateTime.now()
                 )
         );
@@ -70,10 +71,11 @@ public class ReportEventService {
                 new ReportEvent(
                         "SNAPSHOT",
                         reportId,
+                        status,
                         processedCommits,
                         totalCommits,
                         "Текущий статус отчёта: " + status,
-                        null,
+                        List.of(),
                         LocalDateTime.now()
                 )
         );

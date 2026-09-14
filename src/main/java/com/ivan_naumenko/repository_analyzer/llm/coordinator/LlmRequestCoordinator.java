@@ -2,6 +2,7 @@ package com.ivan_naumenko.repository_analyzer.llm.coordinator;
 
 import com.ivan_naumenko.repository_analyzer.llm.cache.service.LlmCacheService;
 import com.ivan_naumenko.repository_analyzer.llm.client.LlmClient;
+import com.ivan_naumenko.repository_analyzer.llm.client.exception.LlmCancelledException;
 import com.ivan_naumenko.repository_analyzer.llm.client.exception.LlmRequestException;
 import com.ivan_naumenko.repository_analyzer.llm.client.model.LlmRequestProfile;
 import com.ivan_naumenko.repository_analyzer.llm.prompt.service.PromptHashService;
@@ -13,7 +14,7 @@ import org.springframework.stereotype.Service;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
@@ -43,7 +44,7 @@ public class LlmRequestCoordinator {
             ReportAudience audience,
             LlmRequestProfile profile
     ) {
-        Objects.requireNonNull(audience, "audience не должен быть null");
+        // audience == null означает общий для всех ролей запрос.
         Objects.requireNonNull(profile, "profile не должен быть null");
         String cacheNamespace = Objects.requireNonNull(
                 llmClient.cacheNamespace(profile),
@@ -65,7 +66,15 @@ public class LlmRequestCoordinator {
         );
 
         if (existingFuture != null) {
-            return await(existingFuture);
+            try {
+                return await(existingFuture);
+            } catch (LlmCancelledException cancelled) {
+                if (Thread.currentThread().isInterrupted()) {
+                    throw cancelled;
+                }
+                // Такой же запрос другого отчёта остановили — выполняем его сами.
+                return getOrGenerate(prompt, audience, profile);
+            }
         }
 
         try {
@@ -100,8 +109,14 @@ public class LlmRequestCoordinator {
 
     private String await(CompletableFuture<String> future) {
         try {
-            return future.join();
-        } catch (CompletionException exception) {
+            return future.get();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new LlmCancelledException(
+                    "Ожидание LLM-ответа прервано",
+                    exception
+            );
+        } catch (ExecutionException exception) {
             Throwable cause = exception.getCause();
             if (cause instanceof RuntimeException runtimeException) {
                 throw runtimeException;

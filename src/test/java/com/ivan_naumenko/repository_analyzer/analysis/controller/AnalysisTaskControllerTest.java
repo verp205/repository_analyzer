@@ -11,6 +11,7 @@ import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisRecoverySe
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskService;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisProgressService;
 import com.ivan_naumenko.repository_analyzer.git.model.GitCredentials;
+import com.ivan_naumenko.repository_analyzer.security.RepositoryUrlPolicy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -23,6 +24,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.time.LocalDateTime;
 import java.util.concurrent.RejectedExecutionException;
 
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -52,16 +55,22 @@ class AnalysisTaskControllerTest {
     @Mock
     private AnalysisOrchestrator orchestrator;
 
+    @Mock
+    private RepositoryUrlPolicy repositoryUrlPolicy;
+
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
+        lenient().when(repositoryUrlPolicy.validate(anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
         AnalysisTaskController controller = new AnalysisTaskController(
                 analysisTaskService,
                 analysisProgressService,
                 analysisRecoveryService,
                 new TaskMapper(),
-                orchestrator
+                orchestrator,
+                repositoryUrlPolicy
         );
 
         mockMvc = MockMvcBuilders.standaloneSetup(controller)

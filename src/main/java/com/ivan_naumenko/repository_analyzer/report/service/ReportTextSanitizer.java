@@ -4,20 +4,41 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Pattern;
 
+/**
+ * Приводит Markdown-ответ модели к формату отчёта: убирает рассуждения,
+ * внешнюю обёртку в блок кода, заголовки первого уровня (заголовок отчёта
+ * формирует система) и превращает таблицы в списки.
+ */
 @Service
 public class ReportTextSanitizer {
+
+    private static final Pattern THINK_BLOCK = Pattern.compile(
+            "(?is)<think>.*?</think>"
+    );
+    private static final Pattern OUTER_FENCE = Pattern.compile(
+            "(?s)^```[a-zA-Z]*\\R(.*)\\R```$"
+    );
 
     public String sanitize(String text) {
         if (text == null || text.isBlank()) {
             throw new IllegalArgumentException("Текст LLM-ответа не должен быть пустым");
         }
 
+        String cleaned = THINK_BLOCK.matcher(text).replaceAll("").strip();
+        cleaned = OUTER_FENCE.matcher(cleaned).replaceFirst("$1").strip();
+        if (cleaned.isBlank()) {
+            throw new IllegalArgumentException("Текст LLM-ответа не должен быть пустым");
+        }
+
         List<String> result = new ArrayList<>();
         boolean fencedCode = false;
 
-        for (String line : text.strip().split("\\R", -1)) {
+        for (String line : cleaned.split("\\R", -1)) {
             String trimmed = line.trim();
             if (trimmed.startsWith("```")) {
                 fencedCode = !fencedCode;
@@ -25,6 +46,9 @@ public class ReportTextSanitizer {
                 continue;
             }
 
+            if (!fencedCode && trimmed.startsWith("# ")) {
+                continue;
+            }
             if (!fencedCode && isTableSeparator(trimmed)) {
                 continue;
             }
@@ -35,7 +59,47 @@ public class ReportTextSanitizer {
             result.add(line);
         }
 
-        return String.join("\n", result).strip();
+        List<String> compact = removeEmptySections(result);
+        return String.join(
+                "\n",
+                compact.stream().anyMatch(line -> !line.isBlank()) ? compact : result
+        ).strip();
+    }
+
+    /**
+     * Модель иногда оставляет заголовок без текста или повторяет пункт в
+     * одном разделе. Такие места только занимают место в документе.
+     */
+    private List<String> removeEmptySections(List<String> lines) {
+        List<String> output = new ArrayList<>();
+        List<String> section = new ArrayList<>();
+        Set<String> seenItems = new HashSet<>();
+        boolean fencedCode = false;
+
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("```")) {
+                fencedCode = !fencedCode;
+            }
+            if (!fencedCode && trimmed.startsWith("## ")) {
+                flushSection(output, section);
+                section = new ArrayList<>();
+                seenItems.clear();
+            } else if (!fencedCode && trimmed.startsWith("- ") && !seenItems.add(trimmed)) {
+                continue;
+            }
+            section.add(line);
+        }
+        flushSection(output, section);
+        return output;
+    }
+
+    private void flushSection(List<String> output, List<String> section) {
+        boolean heading = !section.isEmpty() && section.getFirst().trim().startsWith("## ");
+        boolean empty = section.stream().skip(heading ? 1 : 0).allMatch(String::isBlank);
+        if (!(heading && empty)) {
+            output.addAll(section);
+        }
     }
 
     private boolean isMarkdownTableRow(String line) {

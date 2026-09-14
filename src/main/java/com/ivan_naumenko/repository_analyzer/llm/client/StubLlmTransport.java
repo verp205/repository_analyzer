@@ -1,12 +1,14 @@
 package com.ivan_naumenko.repository_analyzer.llm.client;
 
-import com.ivan_naumenko.repository_analyzer.llm.prompt.service.PromptHashService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 @Component
-@RequiredArgsConstructor
 @ConditionalOnProperty(
         prefix = "repository-analyzer.llm",
         name = "provider",
@@ -15,90 +17,62 @@ import org.springframework.stereotype.Component;
 )
 public class StubLlmTransport implements LlmTransport {
 
-    private final PromptHashService promptHashService;
+    private static final Pattern COMMIT_HASH = Pattern.compile(
+            "\"commitHash\"\\s*:\\s*\"([0-9a-fA-F]{7})"
+    );
+    private static final String COMMIT_FIELDS = """
+            "summary":"Демонстрационный анализ коммита: подключите LLM для реальных выводов.",\
+            "category":"CHORE","riskLevel":"LOW",\
+            "keyChanges":["Демонстрационный transport не читает изменения"],\
+            "behaviorImpact":"","risks":[],"securityNotes":[],"testNotes":"","checks":[]""";
 
     @Override
     public String cacheNamespace() {
-        return "stub:v2";
+        return "stub:v3";
     }
 
     @Override
     public String generate(String prompt) {
-        String hash = promptHashService.calculate(prompt);
-
         if (prompt.contains("TASK_TYPE: PROJECT_SYNTHESIS_FINAL")) {
             return """
-                    ## 1. Общая картина проекта
+                    ## Главное
 
-                    История показывает последовательное развитие репозитория. Это
-                    демонстрационная сводка: реальная модель сформирует выводы по
-                    доступным анализам коммитов и техническим метрикам.
+                    - Это демонстрационный отчёт: реальная модель не подключена.
+                    - История репозитория обработана, показатели рассчитаны системой.
 
-                    ## 2. Основные направления развития
+                    ## О проекте
 
-                    - Развитие функциональности и технической инфраструктуры.
-                    - Уточнение контрактов и повышение управляемости изменений.
+                    Смысловой анализ появится после подключения inference-сервера.
 
-                    ## 3. Эволюция архитектуры
+                    ## Рекомендации
 
-                    Доступные данные переданы в этап общего синтеза. Для точных
-                    архитектурных выводов необходимо подключить inference-сервер.
+                    - Укажите `repository-analyzer.llm.provider=openai-compatible`.
 
-                    ## 4. Что сделано хорошо
+                    ## Ограничения анализа
 
-                    - Анализ коммитов разделён на независимые задачи.
-                    - Ответы кэшируются и собираются в хронологическом порядке.
-
-                    ## 5. Повторяющиеся проблемы и риски
-
-                    Демонстрационный transport не выполняет реальный поиск рисков.
-
-                    ## 6. Незавершённые направления
-
-                    Требуется подключить настоящую LLM-модель для смыслового анализа.
-
-                    ## 7. Наиболее значимые изменения
-
-                    Значимые изменения будут выбраны моделью на основании сводок.
-
-                    ## 8. Рекомендации для выбранной роли
-
-                    Проверьте настройки inference-сервера и полноту переданного контекста.
-
-                    ## 9. Ограничения анализа
-
-                    Ответ сформирован демонстрационным transport и не является
-                    содержательным аудитом репозитория.
-
-                    Prompt hash: `%s`
-                    """.formatted(hash);
+                    Ответ сформирован демонстрационным transport.
+                    """;
         }
-
         if (prompt.contains("TASK_TYPE: PROJECT_SYNTHESIS_BATCH")) {
             return """
                     - Сводка группы коммитов подготовлена для итогового синтеза.
-                    - Фактический смысловой анализ появится после подключения LLM.
                     - Ограничение: используется демонстрационный transport.
-
-                    Prompt hash: `%s`
-                    """.formatted(hash);
+                    """;
         }
-
-        return """
-                ### Демонстрационный LLM-ответ
-
-                Реальный inference-сервер пока отключён. Backend успешно:
-
-                - сформировал компактный контекст коммита;
-                - создал ролевой prompt;
-                - выполнил single-flight координацию;
-                - подготовил ответ к сохранению в SQLite-кэше.
-
-                Prompt hash: `%s`
-
-                Для настоящего смыслового анализа включите
-                `repository-analyzer.llm.provider=openai-compatible` и укажите параметры
-                OpenAI-compatible inference-сервера.
-                """.formatted(hash);
+        if (prompt.contains("TASK_TYPE: COMMIT_INSIGHT_BATCH")) {
+            List<String> items = new ArrayList<>();
+            Matcher matcher = COMMIT_HASH.matcher(prompt);
+            while (matcher.find()) {
+                items.add("{\"hash\":\"%s\",%s}".formatted(
+                        matcher.group(1),
+                        COMMIT_FIELDS
+                ));
+            }
+            return "{\"commits\":[" + String.join(",", items) + "]}";
+        }
+        if (prompt.contains("TASK_TYPE: COMMIT_INSIGHT")) {
+            return "{" + COMMIT_FIELDS + "}";
+        }
+        return "Демонстрационный ответ inference-сервера.";
     }
 }

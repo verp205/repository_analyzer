@@ -7,6 +7,7 @@ import com.ivan_naumenko.repository_analyzer.git.exception.RepositoryReadExcepti
 import com.ivan_naumenko.repository_analyzer.git.exception.RepositorySyncException;
 import com.ivan_naumenko.repository_analyzer.git.model.GitCommit;
 import com.ivan_naumenko.repository_analyzer.git.model.GitCredentials;
+import com.ivan_naumenko.repository_analyzer.git.model.GitTag;
 import lombok.RequiredArgsConstructor;
 import org.eclipse.jgit.api.CloneCommand;
 import org.eclipse.jgit.api.CreateBranchCommand;
@@ -14,6 +15,9 @@ import org.eclipse.jgit.api.FetchCommand;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.errors.IncorrectObjectTypeException;
+import org.eclipse.jgit.errors.MissingObjectException;
+import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectLoader;
 import org.eclipse.jgit.lib.PersonIdent;
@@ -23,6 +27,7 @@ import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.transport.CredentialsProvider;
+import org.eclipse.jgit.transport.TagOpt;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -37,8 +42,11 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.IntStream;
@@ -241,6 +249,123 @@ public class GitService {
         }
     }
 
+    /** Теги локальной копии, от новых к старым. Теги не на коммиты пропускаются. */
+    public List<GitTag> listTags(String repositoryUrl, String branch) {
+        validateArguments(repositoryUrl, branch);
+        String repositoryKey = repositoryKey(repositoryUrl.trim(), branch.trim());
+        Lock repositoryLock = lockFor(repositoryKey);
+        repositoryLock.lock();
+
+        try (Git git = openLocalRepository(repositoryKey);
+             RevWalk revWalk = new RevWalk(git.getRepository())) {
+            List<GitTag> tags = new ArrayList<>();
+            for (Ref ref : git.getRepository()
+                    .getRefDatabase()
+                    .getRefsByPrefix(Constants.R_TAGS)) {
+                try {
+                    RevCommit commit = revWalk.parseCommit(ref.getObjectId());
+                    tags.add(new GitTag(
+                            ref.getName().substring(Constants.R_TAGS.length()),
+                            commit.getName(),
+                            Instant.ofEpochSecond(commit.getCommitTime())
+                    ));
+                } catch (IncorrectObjectTypeException | MissingObjectException ignored) {
+                    // Тег указывает не на коммит — для периода отчёта он бесполезен.
+                }
+            }
+            tags.sort(Comparator.comparing(GitTag::committedAt)
+                    .reversed()
+                    .thenComparing(GitTag::name));
+            return tags;
+        } catch (IOException exception) {
+            throw new RepositoryReadException(
+                    "Не удалось прочитать теги репозитория",
+                    exception
+            );
+        } finally {
+            repositoryLock.unlock();
+        }
+    }
+
+    /**
+     * Хэши коммитов, достижимых из toTag (или из головы ветки, если toTag
+     * не задан), но не из fromTag — аналог {@code git log fromTag..toTag}.
+     */
+    public Set<String> commitsBetween(
+            String repositoryUrl,
+            String branch,
+            String fromTag,
+            String toTag
+    ) {
+        validateArguments(repositoryUrl, branch);
+        if (fromTag == null || fromTag.isBlank()) {
+            throw new IllegalArgumentException("Начальный тег не должен быть пустым");
+        }
+        String normalizedBranch = branch.trim();
+        String repositoryKey = repositoryKey(repositoryUrl.trim(), normalizedBranch);
+        Lock repositoryLock = lockFor(repositoryKey);
+        repositoryLock.lock();
+
+        try (Git git = openLocalRepository(repositoryKey);
+             RevWalk revWalk = new RevWalk(git.getRepository())) {
+            Repository repository = git.getRepository();
+            ObjectId start = toTag == null
+                    ? requireRef(
+                            repository,
+                            Constants.R_HEADS + normalizedBranch,
+                            "Локальная ветка не найдена: " + normalizedBranch
+                    )
+                    : requireRef(
+                            repository,
+                            Constants.R_TAGS + toTag.strip(),
+                            "Тег не найден: " + toTag.strip()
+                    );
+            ObjectId excluded = requireRef(
+                    repository,
+                    Constants.R_TAGS + fromTag.strip(),
+                    "Тег не найден: " + fromTag.strip()
+            );
+
+            revWalk.markStart(revWalk.parseCommit(start));
+            revWalk.markUninteresting(revWalk.parseCommit(excluded));
+
+            Set<String> hashes = new HashSet<>();
+            for (RevCommit commit : revWalk) {
+                hashes.add(commit.getName());
+            }
+            return hashes;
+        } catch (IOException exception) {
+            throw new RepositoryReadException(
+                    "Не удалось определить коммиты между тегами",
+                    exception
+            );
+        } finally {
+            repositoryLock.unlock();
+        }
+    }
+
+    private Git openLocalRepository(String repositoryKey) throws IOException {
+        Path localRepository = getRepositoriesRoot().resolve(repositoryKey);
+        if (!Files.isDirectory(localRepository.resolve(".git"))) {
+            throw new RepositoryNotFoundException(
+                    "Локальный репозиторий не найден: " + localRepository
+            );
+        }
+        return Git.open(localRepository.toFile());
+    }
+
+    private ObjectId requireRef(
+            Repository repository,
+            String name,
+            String message
+    ) throws IOException {
+        Ref ref = repository.exactRef(name);
+        if (ref == null || ref.getObjectId() == null) {
+            throw new IllegalArgumentException(message);
+        }
+        return ref.getObjectId();
+    }
+
     private void updateRepository(
             Path repositoryDirectory,
             String branch,
@@ -248,7 +373,8 @@ public class GitService {
     ) throws IOException, GitAPIException {
         try (Git git = Git.open(repositoryDirectory.toFile())) {
             FetchCommand fetchCommand = git.fetch()
-                    .setRemote(REMOTE_NAME);
+                    .setRemote(REMOTE_NAME)
+                    .setTagOpt(TagOpt.FETCH_TAGS);
 
             if (credentialsProvider != null) {
                 fetchCommand.setCredentialsProvider(credentialsProvider);
@@ -364,7 +490,8 @@ public class GitService {
         CloneCommand cloneCommand = Git.cloneRepository()
                 .setURI(repositoryUrl)
                 .setDirectory(repositoryDirectory.toFile())
-                .setBranch(branch);
+                .setBranch(branch)
+                .setTagOption(TagOpt.FETCH_TAGS);
 
         if (credentialsProvider != null) {
             cloneCommand.setCredentialsProvider(credentialsProvider);

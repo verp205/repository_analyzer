@@ -4,18 +4,26 @@ import type {
   AnalysisTask,
   CommitClusters,
   CommitGraph,
+  CommitInsight,
+  GitTag,
   ReportAudience,
+  ReportPeriod,
+  RepositoryFacts,
 } from "@/lib/types";
 
 export const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8080"
+  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8080"
 ).replace(/\/$/, "");
+
+/** Нужен, только если на backend задан API_TOKEN. */
+const API_TOKEN: string = import.meta.env.VITE_API_TOKEN || "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...(API_TOKEN ? { "X-Api-Token": API_TOKEN } : {}),
       ...init?.headers,
     },
   });
@@ -32,6 +40,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+export function toPeriodRequest(period: ReportPeriod): ReportPeriod {
+  return {
+    type: period.type,
+    days: period.days ?? null,
+    fromTag: period.fromTag ?? null,
+    toTag: period.toTag ?? null,
+  };
 }
 
 export const api = {
@@ -72,15 +89,25 @@ export const api = {
     request<CommitGraph>(`/api/analysis-tasks/${taskId}/graph`),
   getClusters: (taskId: number) =>
     request<CommitClusters>(`/api/analysis-tasks/${taskId}/clusters`),
+  getTags: (taskId: number) =>
+    request<GitTag[]>(`/api/analysis-tasks/${taskId}/tags`),
   listReports: (taskId: number) =>
     request<AnalysisReport[]>(`/api/analysis-tasks/${taskId}/reports`),
-  createReport: (taskId: number, audience: ReportAudience) =>
+  createReport: (
+    taskId: number,
+    audience: ReportAudience,
+    period: ReportPeriod,
+  ) =>
     request<AnalysisReport>(`/api/analysis-tasks/${taskId}/reports`, {
       method: "POST",
-      body: JSON.stringify({ audience }),
+      body: JSON.stringify({ audience, period: toPeriodRequest(period) }),
     }),
   getReport: (reportId: number) =>
     request<AnalysisReport>(`/api/reports/${reportId}`),
+  getReportFacts: (reportId: number) =>
+    request<RepositoryFacts>(`/api/reports/${reportId}/facts`),
+  getReportCommitInsights: (reportId: number) =>
+    request<CommitInsight[]>(`/api/reports/${reportId}/commit-insights`),
   retryReport: (reportId: number) =>
     request<AnalysisReport>(`/api/reports/${reportId}/retry`, {
       method: "POST",
@@ -90,5 +117,7 @@ export const api = {
       method: "POST",
     }),
   reportEventsUrl: (reportId: number) =>
-    `${API_BASE_URL}/api/reports/${reportId}/events`,
+    `${API_BASE_URL}/api/reports/${reportId}/events${
+      API_TOKEN ? `?access_token=${encodeURIComponent(API_TOKEN)}` : ""
+    }`,
 };

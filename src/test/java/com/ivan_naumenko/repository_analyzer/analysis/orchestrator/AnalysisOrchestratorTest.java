@@ -67,7 +67,14 @@ class AnalysisOrchestratorTest {
                 commitWorkerFactory,
                 new AnalysisProperties(2, 100, 3),
                 new SqliteWriteCoordinator(),
-                analysisExecutor
+                analysisExecutor,
+                new com.ivan_naumenko.repository_analyzer.security.RepositoryUrlPolicy(
+                        new com.ivan_naumenko.repository_analyzer.security.SecurityProperties(
+                                true,
+                                java.util.List.of(),
+                                ""
+                        )
+                )
         );
     }
 
