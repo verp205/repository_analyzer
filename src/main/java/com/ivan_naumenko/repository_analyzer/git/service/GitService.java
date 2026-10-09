@@ -430,10 +430,15 @@ public class GitService {
             String filePath
     ) {
         validateFileReadArguments(repositoryPath, commitHash, filePath);
+        return readFilesAtCommit(repositoryPath, commitHash, List.of(filePath)).get(filePath);
+    }
 
+    /** One repository handle and revision walk for all files, with identical blob contents. */
+    public java.util.Map<String, String> readFilesAtCommit(Path repositoryPath, String commitHash, List<String> filePaths) {
+        for (String filePath : filePaths) validateFileReadArguments(repositoryPath, commitHash, filePath);
+        if (filePaths.isEmpty()) return java.util.Map.of();
         String normalizedCommitHash = commitHash.trim();
-        String normalizedFilePath = normalizeGitPath(filePath);
-
+        java.util.Map<String, String> contents = new java.util.LinkedHashMap<>();
         try (Git git = Git.open(repositoryPath.toFile());
              RevWalk revWalk = new RevWalk(git.getRepository())) {
             Repository repository = git.getRepository();
@@ -447,33 +452,36 @@ public class GitService {
             }
 
             RevCommit commit = revWalk.parseCommit(commitId);
+            for (String filePath : filePaths) {
+                String normalizedFilePath = normalizeGitPath(filePath);
+                try (TreeWalk treeWalk = TreeWalk.forPath(
+                        repository,
+                        normalizedFilePath,
+                        commit.getTree()
+                )) {
+                    if (treeWalk == null) {
+                        throw new RepositoryReadException(
+                                "Файл "
+                                        + normalizedFilePath
+                                        + " не найден в коммите "
+                                        + normalizedCommitHash
+                        );
+                    }
 
-            try (TreeWalk treeWalk = TreeWalk.forPath(
-                    repository,
-                    normalizedFilePath,
-                    commit.getTree()
-            )) {
-                if (treeWalk == null) {
-                    throw new RepositoryReadException(
-                            "Файл "
-                                    + normalizedFilePath
-                                    + " не найден в коммите "
-                                    + normalizedCommitHash
-                    );
+                    ObjectId blobId = treeWalk.getObjectId(0);
+                    ObjectLoader loader = repository.open(blobId);
+
+                    contents.put(filePath, new String(
+                            loader.getBytes(),
+                            StandardCharsets.UTF_8
+                    ));
                 }
-
-                ObjectId blobId = treeWalk.getObjectId(0);
-                ObjectLoader loader = repository.open(blobId);
-
-                return new String(
-                        loader.getBytes(),
-                        StandardCharsets.UTF_8
-                );
             }
+            return java.util.Map.copyOf(contents);
         } catch (IOException exception) {
             throw new RepositoryReadException(
-                    "Не удалось прочитать файл "
-                            + normalizedFilePath
+                    "Не удалось прочитать файлы "
+                            + filePaths
                             + " из коммита "
                             + normalizedCommitHash,
                     exception

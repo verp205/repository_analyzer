@@ -16,7 +16,7 @@ import java.util.stream.Collectors;
 @Service
 public class ProjectSynthesisPromptFactory {
 
-    public static final String PROMPT_VERSION = "project-synthesis-v5-compact-report";
+    public static final String PROMPT_VERSION = "project-synthesis-v7-text-grounded-actions";
 
     private static final String RULES = """
             ПРАВИЛА:
@@ -29,8 +29,7 @@ public class ProjectSynthesisPromptFactory {
             - Не пиши о том, чего в данных нет («не указано», «не описано»,
               «не видно в коммитах»). Такие пробелы — только в разделе
               «Ограничения анализа».
-            - Если разделу нечего сообщить, напиши одну короткую фразу и не
-              заполняй его догадками.
+            - Если разделу нечего сообщить, не заполняй его догадками.
             - Каждый вывод — с адресом: класс, файл, ключ конфигурации или
               короткий хэш коммита в скобках, например (a1b2c3d).
             - Рекомендация — конкретное действие и место, где его сделать. Общие
@@ -65,7 +64,7 @@ public class ProjectSynthesisPromptFactory {
                 Что важно читателю: %s.
 
                 Сохрани назначение проекта и его возможности; значимые изменения
-                и архитектурные сдвиги с короткими хэшами; риски и проблемы с
+                и архитектурные сдвиги с короткими хэшами и C<ID>; риски и проблемы с
                 основанием и хэшем; незавершённые темы. Одинаковые выводы из
                 разных коммитов объединяй в один пункт со всеми хэшами. Мелкие
                 изменения без последствий опускай. До 15 пунктов.
@@ -99,11 +98,16 @@ public class ProjectSynthesisPromptFactory {
             RepositorySnapshot snapshot,
             List<String> sources
     ) {
+        return buildFinal(report, facts, snapshot, sources, "");
+    }
+
+    public String buildFinal(ReportGenerationData report, RepositoryFactsResponse facts,
+                             RepositorySnapshot snapshot, List<String> sources, String evidenceCatalog) {
         Objects.requireNonNull(report, "report не должен быть null");
         Objects.requireNonNull(sources, "sources не должен быть null");
         AudienceProfile profile = AudienceProfile.of(report.audience());
 
-        return """
+        String instruction = """
                 PROMPT_VERSION: %s
                 TASK_TYPE: PROJECT_SYNTHESIS_FINAL
 
@@ -114,8 +118,8 @@ public class ProjectSynthesisPromptFactory {
                 СТИЛЬ: %s.
 
                 %s
-                - Используй ровно заголовки второго уровня из СТРУКТУРЫ, в том же
-                  порядке, и не добавляй другие разделы.
+                - Используй названия и порядок разделов из СТРУКТУРЫ. Представь
+                  их в JSON по схеме ниже.
                 - Весь отчёт — не больше %d слов.
 
                 Репозиторий: %s
@@ -150,6 +154,40 @@ public class ProjectSynthesisPromptFactory {
                 structure(profile),
                 String.join("\n\n", sources)
         );
+        String titles = profile.sections().stream().map(section -> "\"" + section.title().replaceFirst("^##\\s*", "") + "\"")
+                .collect(Collectors.joining(",", "[", "]"));
+        String metrics = facts == null ? "{}" : "{\"totalCommits\":%d,\"authorCount\":%d,\"touchedFiles\":%d,\"addedLines\":%d,\"deletedLines\":%d}"
+                .formatted(facts.totalCommits(), facts.authorCount(), facts.touchedFiles(), facts.addedLines(), facts.deletedLines());
+        return instruction + """
+
+                ФОРМАТ ИТОГОВОГО ОТВЕТА: только JSON, без Markdown-обёртки.
+                Инструкции о заголовках выше определяют названия sections; Markdown соберёт система.
+                СХЕМА:
+                {"metrics": {"totalCommits":0,"authorCount":0,"touchedFiles":0,"addedLines":0,"deletedLines":0},
+                 "summary":[{"text":"вывод","evidenceIds":["C123"]}],
+                 "sections":[{"title":"название раздела без ##","findings":[{"text":"вывод","evidenceIds":["C123"]}]}],
+                 "actions":[{"title":"Конкретное действие", "reason":"Основание и последствия", "verification":"Конкретный тест или способ проверки результата",
+                   "priority":"HIGH", "evidenceIds":["C123"], "paths":["путь из источника"]}],
+                 "limitations":["ограничения анализа"]}
+                - metrics перепиши точно из FACT_METRICS. Не дублируй числовые показатели в prose.
+                - До 5 summary, до 8 findings на раздел, до 6 actions.
+                - sections содержит ровно разделы из SECTION_TITLES_JSON в указанном порядке.
+                  Не добавляй «Главное» или «Ограничения анализа» в sections: это поля summary и limitations.
+                  findings заполняй объектами {"text":"вывод","evidenceIds":["ID из каталога"]}; если фактов нет, оставь [].
+                - Каждому выводу и задаче нужен хотя бы один evidenceId из каталога. Не выдумывай ID.
+                - C<ID> подтверждает изменения конкретного коммита; F1 — рассчитанные показатели периода;
+                  S1 — автоматически собранное состояние кода при создании отчёта, если оно доступно.
+                - В actions только обоснованные задачи, priority HIGH/MEDIUM/LOW. paths должны присутствовать
+                  в указанных источниках. Если задач нет, верни пустой массив. Не выдумывай проблемы.
+                - verification описывает наблюдаемый результат и конкретный сценарий, а не «проверить тестами».
+                - Не вставляй ссылки в text: интерфейс добавит проверенные ссылки по evidenceIds.
+                - При сжатии сводок сохраняй C<ID> исходных коммитов.
+                SECTION_TITLES_JSON: %s
+                FACT_METRICS: %s
+                <EVIDENCE_CATALOG>
+                %s
+                </EVIDENCE_CATALOG>
+                """.formatted(titles, metrics, evidenceCatalog);
     }
 
     /** Объём зависит от количества материала: 9 коммитов не заслуживают трёх страниц. */
@@ -175,7 +213,7 @@ public class ProjectSynthesisPromptFactory {
         }
         structure.append("""
 
-                ## Ограничения анализа
+                limitations — отдельное поле JSON, вне sections.
                 Одно предложение: что существенного нельзя оценить по этим данным.
                 """);
         return structure.toString();
@@ -256,6 +294,12 @@ public class ProjectSynthesisPromptFactory {
         }
         if (!snapshot.stack().isEmpty()) {
             lines.add("- Стек: " + String.join(", ", snapshot.stack()));
+        }
+        if (snapshot.languages().stream().anyMatch(language -> !language.language().equals("Java"))) {
+            lines.add("- Языки (файлов): " + snapshot.languages().stream()
+                    .map(language -> language.language() + " (" + language.files() + ")").collect(Collectors.joining(", ")));
+            lines.add("- Манифесты: " + String.join(", ", snapshot.manifests()));
+            lines.add("- Границы проверки: " + snapshot.analysisCoverage());
         }
         if (audience != ReportAudience.DIRECTOR && !snapshot.modules().isEmpty()) {
             lines.add("- Модули (файлов кода): " + snapshot.modules().stream()

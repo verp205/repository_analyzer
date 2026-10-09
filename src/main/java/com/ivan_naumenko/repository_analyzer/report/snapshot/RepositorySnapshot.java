@@ -16,14 +16,35 @@ public record RepositorySnapshot(
         int testSourceFiles,
         List<String> controllers,
         SecurityFacts security,
-        boolean truncated
+        boolean truncated,
+        List<String> sourcePaths,
+        List<LanguageFact> languages,
+        List<String> manifests,
+        String analysisCoverage
 ) {
 
+    public RepositorySnapshot(boolean available, String description, List<String> stack, List<ModuleFact> modules,
+                              int mainSourceFiles, int testSourceFiles, List<String> controllers, SecurityFacts security,
+                              boolean truncated, List<String> sourcePaths) {
+        this(available, description, stack, modules, mainSourceFiles, testSourceFiles, controllers, security,
+                truncated, sourcePaths, List.of(), List.of(), "Текстовые признаки; структурный разбор Java; признаки защиты Spring.");
+    }
+
+    public RepositorySnapshot(boolean available, String description, List<String> stack, List<ModuleFact> modules,
+                              int mainSourceFiles, int testSourceFiles, List<String> controllers, SecurityFacts security,
+                              boolean truncated) {
+        this(available, description, stack, modules, mainSourceFiles, testSourceFiles, controllers, security, truncated, List.of());
+    }
+
     public RepositorySnapshot {
+        sourcePaths = sourcePaths == null ? List.of() : List.copyOf(sourcePaths);
         stack = stack == null ? List.of() : List.copyOf(stack);
         modules = modules == null ? List.of() : List.copyOf(modules);
         controllers = controllers == null ? List.of() : List.copyOf(controllers);
         security = security == null ? SecurityFacts.empty() : security;
+        languages = languages == null ? List.of() : List.copyOf(languages);
+        manifests = manifests == null ? List.of() : List.copyOf(manifests);
+        analysisCoverage = analysisCoverage == null ? "Текстовый анализ; отсутствие признака не доказывает отсутствие риска." : analysisCoverage;
     }
 
     public static RepositorySnapshot unavailable() {
@@ -32,6 +53,8 @@ public record RepositorySnapshot(
 
     public record ModuleFact(String name, int files) {
     }
+
+    public record LanguageFact(String language, int files) {}
 
     /**
      * Признаки найдены по тексту файлов и не заменяют аудит: отсутствие

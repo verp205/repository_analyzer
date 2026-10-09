@@ -1,7 +1,10 @@
 import type {
   AnalysisProgress,
   AnalysisReport,
+  ReportSummary,
   AnalysisTask,
+  EvidenceDetail,
+  EvidenceFile,
   CommitClusters,
   CommitGraph,
   CommitInsight,
@@ -81,6 +84,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ gitUsername, gitAccessToken }),
     }),
+  refreshTask: (taskId: number, gitUsername?: string, gitAccessToken?: string) =>
+    request<AnalysisTask>(`/api/analysis-tasks/${taskId}/refresh`, {
+      method: "POST",
+      body: JSON.stringify({ gitUsername, gitAccessToken }),
+    }),
+  getEvidence: (reportId: number, evidenceId: string) =>
+    request<EvidenceDetail>(`/api/reports/${reportId}/evidence/${encodeURIComponent(evidenceId)}`),
+  getEvidenceFile: (reportId: number, evidenceId: string, position: number) =>
+    request<EvidenceFile>(`/api/reports/${reportId}/evidence/${encodeURIComponent(evidenceId)}/files/${position}`),
   cancelTask: (taskId: number) =>
     request<AnalysisTask>(`/api/analysis-tasks/${taskId}/cancel`, {
       method: "POST",
@@ -92,7 +104,7 @@ export const api = {
   getTags: (taskId: number) =>
     request<GitTag[]>(`/api/analysis-tasks/${taskId}/tags`),
   listReports: (taskId: number) =>
-    request<AnalysisReport[]>(`/api/analysis-tasks/${taskId}/reports`),
+    request<ReportSummary[]>(`/api/analysis-tasks/${taskId}/report-summaries`),
   createReport: (
     taskId: number,
     audience: ReportAudience,

@@ -28,30 +28,29 @@ public class StubLlmTransport implements LlmTransport {
 
     @Override
     public String cacheNamespace() {
-        return "stub:v3";
+        return "stub:v4";
     }
 
     @Override
     public String generate(String prompt) {
+        if (prompt.contains("TASK_TYPE: GROUNDED_REVIEW")) {
+            return "{\"findings\":[],\"unknowns\":[\"Демонстрационный режим: смысловая проверка кода не выполнялась.\"]}";
+        }
         if (prompt.contains("TASK_TYPE: PROJECT_SYNTHESIS_FINAL")) {
-            return """
-                    ## Главное
+            var mapper = new tools.jackson.databind.ObjectMapper();
+            String metrics = capture(prompt, "FACT_METRICS: (\\{[^\\n]+})");
+            String titles = capture(prompt, "SECTION_TITLES_JSON: (\\[[^\\n]+])");
+            var sections = new java.util.ArrayList<java.util.Map<String, Object>>();
+            for (var title : mapper.readTree(titles)) {
+                sections.add(java.util.Map.of("title", title.stringValue(), "findings", List.of()));
+            }
+            return mapper.writeValueAsString(java.util.Map.of(
+                    "metrics", mapper.readTree(metrics),
+                    "summary", List.of(java.util.Map.of("text", "Демонстрационный отчёт: показатели рассчитаны системой, смысловая оценка не выполнялась.", "evidenceIds", List.of("F1"))),
+                    "sections", sections,
+                    "actions", List.of(),
+                    "limitations", List.of("Ответ сформирован демонстрационным transport, реальная модель не подключена.")));
 
-                    - Это демонстрационный отчёт: реальная модель не подключена.
-                    - История репозитория обработана, показатели рассчитаны системой.
-
-                    ## О проекте
-
-                    Смысловой анализ появится после подключения inference-сервера.
-
-                    ## Рекомендации
-
-                    - Укажите `repository-analyzer.llm.provider=openai-compatible`.
-
-                    ## Ограничения анализа
-
-                    Ответ сформирован демонстрационным transport.
-                    """;
         }
         if (prompt.contains("TASK_TYPE: PROJECT_SYNTHESIS_BATCH")) {
             return """
@@ -74,5 +73,10 @@ public class StubLlmTransport implements LlmTransport {
             return "{" + COMMIT_FIELDS + "}";
         }
         return "Демонстрационный ответ inference-сервера.";
+    }
+    private String capture(String prompt, String pattern) {
+        var matcher = Pattern.compile(pattern).matcher(prompt);
+        if (!matcher.find()) throw new IllegalArgumentException("Нет данных для демонстрационного отчёта");
+        return matcher.group(1);
     }
 }

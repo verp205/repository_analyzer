@@ -16,6 +16,7 @@ const filters: { id: RiskFilter; label: string }[] = [
 ];
 
 interface CommitInsightListProps {
+  preliminary?: boolean;
   commits: CommitInsight[];
   repositoryUrl: string;
   totalCommits: number;
@@ -27,6 +28,7 @@ export function CommitInsightList({
   repositoryUrl,
   totalCommits,
   defaultOpen,
+  preliminary = false,
 }: CommitInsightListProps) {
   const [open, setOpen] = useState(defaultOpen);
   const [filter, setFilter] = useState<RiskFilter>("ALL");
@@ -74,7 +76,7 @@ export function CommitInsightList({
           onClick={() => setOpen((current) => !current)}
           type="button"
         >
-          <span>Коммиты</span>
+          <span>{preliminary ? "Первичный разбор коммитов" : "Коммиты"}</span>
           <ChevronDown
             className={cn("size-4 text-muted transition-transform", open && "rotate-180")}
           />
@@ -85,6 +87,7 @@ export function CommitInsightList({
         {counts.ATTENTION > 0 && ` · требуют внимания: ${formatNumber(counts.ATTENTION)}`}
       </p>
 
+      {preliminary && <p className="mt-2 text-xs leading-5 text-muted">Здесь сохранены первоначальные оценки модели. Повторно проверенные выводы и уровни риска приведены выше.</p>}
       {open && (
         <div className="mt-4" id="report-commit-list">
           <div className="flex flex-wrap items-center gap-2">

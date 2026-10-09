@@ -1,5 +1,7 @@
 package com.ivan_naumenko.repository_analyzer.report.service;
 
+import com.ivan_naumenko.repository_analyzer.report.artifact.ReportArtifactService;
+import com.ivan_naumenko.repository_analyzer.report.artifact.ReportArtifacts.SynthesisResult;
 import com.ivan_naumenko.repository_analyzer.commitinsight.dto.CommitInsightResponse;
 import com.ivan_naumenko.repository_analyzer.commitinsight.model.ChangeCategory;
 import com.ivan_naumenko.repository_analyzer.commitinsight.model.CommitInsightDetails;
@@ -13,7 +15,6 @@ import com.ivan_naumenko.repository_analyzer.report.config.ReportProperties;
 import com.ivan_naumenko.repository_analyzer.report.facts.dto.RepositoryFactsResponse;
 import com.ivan_naumenko.repository_analyzer.report.model.ReportAudience;
 import com.ivan_naumenko.repository_analyzer.report.model.ReportGenerationData;
-import com.ivan_naumenko.repository_analyzer.report.snapshot.RepositorySnapshotService;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -38,12 +39,14 @@ public class ProjectSynthesisService {
     private final LlmRequestCoordinator requestCoordinator;
     private final ReportTextSanitizer sanitizer;
     private final ReportProperties properties;
-    private final RepositorySnapshotService snapshotService;
+    private final AnalysisReportService reportService;
+    private final ReportArtifactService artifactService;
+    private final com.ivan_naumenko.repository_analyzer.report.grounding.GroundedReviewService groundedReview;
     // Промежуточные сводки ждут LLM; число реальных запросов ограничивает LlmClient.
     private final ExecutorService batchExecutor =
             Executors.newVirtualThreadPerTaskExecutor();
 
-    public String synthesize(
+    public SynthesisResult synthesize(
             ReportGenerationData report,
             RepositoryFactsResponse facts,
             List<CommitInsightResponse> insights
@@ -67,17 +70,19 @@ public class ProjectSynthesisService {
             pass++;
         }
 
+        var snapshot = reportService.snapshot(report.reportId());
+        var commits = reportService.loadCommits(report.reportId());
+        var evidence = artifactService.catalog(report, facts, snapshot, commits, insights);
         String finalPrompt = promptFactory.buildFinal(
                 report,
                 facts,
-                snapshotService.capture(report.repositoryUrl(), report.branch()),
-                sources
+                snapshot,
+                sources, artifactService.promptCatalog(evidence, sources)
         );
-        return sanitizer.sanitize(requestCoordinator.getOrGenerate(
-                finalPrompt,
-                report.audience(),
-                LlmRequestProfile.SYNTHESIS_FINAL
-        ));
+        var draft = ValidatedSynthesis.generate(finalPrompt, report, facts, evidence, artifactService,
+                prompt -> requestCoordinator.getOrGenerate(prompt, report.audience(), LlmRequestProfile.SYNTHESIS_FINAL),
+                (prompt, raw) -> requestCoordinator.discardResponse(prompt, LlmRequestProfile.SYNTHESIS_FINAL, raw));
+        return groundedReview.refine(report, facts, commits, insights, draft);
     }
 
     @PreDestroy
@@ -140,7 +145,7 @@ public class ProjectSynthesisService {
      */
     private String toSource(CommitInsightResponse insight, ReportAudience audience) {
         StringBuilder source = new StringBuilder()
-                .append('[')
+                .append("C").append(insight.commitId()).append(" [")
                 .append(shortHash(insight.commitHash()))
                 .append("] ")
                 .append(insight.committedAt() == null

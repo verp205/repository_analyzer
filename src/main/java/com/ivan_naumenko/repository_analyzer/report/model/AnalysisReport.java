@@ -26,8 +26,8 @@ import java.time.LocalDateTime;
 @Table(
         name = "analysis_report",
         uniqueConstraints = @UniqueConstraint(
-                name = "uk_analysis_report_task_audience_period",
-                columnNames = {"analysis_task_id", "audience", "period_key"}
+                name = "uk_analysis_report_task_audience_period_revision",
+                columnNames = {"analysis_task_id", "audience", "period_key", "analysis_revision"}
         )
 )
 public class AnalysisReport {
@@ -73,6 +73,24 @@ public class AnalysisReport {
 
     @Column(name = "content")
     private String content;
+
+    @Column(name = "analysis_revision", nullable = false)
+    private int analysisRevision;
+
+    @Column(name = "head_commit_hash")
+    private String headCommitHash;
+
+    @Column(name = "commit_ids_json")
+    private String commitIdsJson;
+
+    @Column(name = "snapshot_json")
+    private String snapshotJson;
+
+    @Column(name = "facts_json")
+    private String factsJson;
+
+    @Column(name = "artifacts_json")
+    private String artifactsJson;
 
     @Column(name = "last_error")
     private String lastError;

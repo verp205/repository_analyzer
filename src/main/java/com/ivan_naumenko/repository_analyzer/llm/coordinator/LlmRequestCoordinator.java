@@ -107,6 +107,11 @@ public class LlmRequestCoordinator {
         }
     }
 
+    public void discardResponse(String prompt, LlmRequestProfile profile, String rejectedResponse) {
+        String hash = promptHashService.calculate(llmClient.cacheNamespace(profile) + "\n" + prompt);
+        writeCoordinator.execute(() -> { cacheService.discardResponse(hash, rejectedResponse); return null; });
+    }
+
     private String await(CompletableFuture<String> future) {
         try {
             return future.get();

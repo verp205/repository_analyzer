@@ -70,6 +70,9 @@ export type ChangeCategory =
   | "MERGE";
 
 export interface AnalysisTask {
+  revision: number;
+  headCommitHash: string | null;
+  addedCommits: number;
   id: number;
   repositoryUrl: string;
   branch: string;
@@ -136,7 +139,12 @@ export interface CommitClusters {
   clusters: ChangeCluster[];
 }
 
+export type ReportSummary = Pick<AnalysisReport, "id" | "audience" | "status" | "analysisRevision" | "headCommitHash" | "period" | "createdAt">;
+
 export interface AnalysisReport {
+  analysisRevision: number;
+  headCommitHash: string | null;
+  artifacts: ReportArtifacts | null;
   id: number;
   analysisTaskId: number;
   repositoryUrl: string;
@@ -244,4 +252,95 @@ export interface ReportEvent {
   message: string;
   commits: CommitInsight[];
   timestamp: string;
+}
+
+export interface ReportCitation {
+  id: string;
+  evidenceId: string;
+  path: string;
+  commitHash: string;
+  side: "DIFF" | "BEFORE" | "AFTER" | "RELATED";
+  startLine: number;
+  endLine: number;
+  code: string;
+}
+
+export interface ReportAssessment {
+  kind: "FACT" | "INFERENCE" | "UNKNOWN";
+  observation: string;
+  impact: string;
+  riskLevel: RiskLevel | "";
+  risk: string;
+  unknowns: string[];
+  citations: ReportCitation[];
+}
+
+export interface ReportCoverage {
+  mode?: "SOURCES_ONLY" | "REVIEWED" | null;
+  totalCommits: number;
+  reviewedCommits: number;
+  unreviewedCommits: number;
+  changedFiles: number;
+  inspectedFiles: number;
+  limitedFiles: number;
+  contextFiles: number;
+  rejectedResponses: number;
+  limitations: string[];
+  reviewedRisks: Record<string, RiskLevel>;
+}
+
+export interface ReportFinding {
+  assessment?: ReportAssessment | null;
+  text: string;
+  evidenceIds: string[];
+}
+
+export interface ReportAction {
+  id: string;
+  title: string;
+  reason: string;
+  verification: string;
+  priority: "HIGH" | "MEDIUM" | "LOW";
+  evidenceIds: string[];
+  paths: string[];
+}
+
+export interface ReportEvidence {
+  id: string;
+  kind: "COMMIT" | "FACTS" | "SNAPSHOT" | "CODE";
+  commitId: number | null;
+  commitHash: string | null;
+  label: string;
+  paths: string[];
+  description: string;
+}
+
+export interface ReportArtifacts {
+  coverage?: ReportCoverage | null;
+  summary: ReportFinding[];
+  sections: { title: string; findings: ReportFinding[] }[];
+  actions: ReportAction[];
+  evidence: ReportEvidence[];
+  quality: {
+    status: string;
+    validatedFindings: number;
+    validatedActions: number;
+    checks: string[];
+    warnings: string[];
+  };
+}
+
+export interface EvidenceFile {
+  oldPath: string | null;
+  newPath: string | null;
+  changeType: string;
+  addedLines: number;
+  deletedLines: number;
+  patch: string;
+  truncated: boolean;
+}
+
+export interface EvidenceDetail {
+  source: ReportEvidence;
+  files: EvidenceFile[];
 }

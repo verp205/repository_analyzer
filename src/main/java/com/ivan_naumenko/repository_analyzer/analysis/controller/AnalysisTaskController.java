@@ -9,6 +9,7 @@ import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTask;
 import com.ivan_naumenko.repository_analyzer.analysis.model.AnalysisTaskStatus;
 import com.ivan_naumenko.repository_analyzer.analysis.orchestrator.AnalysisOrchestrator;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisRecoveryService;
+import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisRefreshService;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisTaskService;
 import com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisProgressService;
 import com.ivan_naumenko.repository_analyzer.git.model.GitCredentials;
@@ -37,6 +38,7 @@ public class AnalysisTaskController {
     private final TaskMapper taskMapper;
     private final AnalysisOrchestrator orchestrator;
     private final RepositoryUrlPolicy repositoryUrlPolicy;
+    private final AnalysisRefreshService refreshService;
 
     @GetMapping
     public List<AnalysisTaskResponse> getAnalysisTasks() {
@@ -95,6 +97,16 @@ public class AnalysisTaskController {
         }
 
         return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{id}/refresh")
+    public ResponseEntity<AnalysisTaskResponse> refreshTask(
+            @PathVariable Integer id,
+            @Valid @RequestBody(required = false) RetryAnalysisTaskRequest request) {
+        GitCredentials credentials = request == null ? null : GitCredentials.from(request.gitUsername(), request.gitAccessToken());
+        boolean started = refreshService.refresh(id, credentials);
+        AnalysisTaskResponse response = taskMapper.toResponse(analysisTaskService.getById(id));
+        return started ? ResponseEntity.accepted().body(response) : ResponseEntity.ok(response);
     }
 
     @PostMapping("/{id}/retry")

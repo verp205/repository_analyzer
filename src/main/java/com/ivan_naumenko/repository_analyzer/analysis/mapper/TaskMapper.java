@@ -17,6 +17,9 @@ public class TaskMapper {
         response.setStatus(task.getStatus());
         response.setCreatedAt(task.getCreatedAt());
         response.setUpdatedAt(task.getUpdatedAt());
+        response.setRevision(task.getRevision());
+        response.setHeadCommitHash(task.getHeadCommitHash());
+        response.setAddedCommits(task.getAddedCommits());
 
         return response;
     }

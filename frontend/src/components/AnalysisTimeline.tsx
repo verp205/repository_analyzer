@@ -45,7 +45,7 @@ export function AnalysisTimeline({
       title: "Анализ изменений",
       detail: progress?.totalCommits
         ? `Обработано коммитов: ${progress.completedCommits} из ${progress.totalCommits}`
-        : "Diff и структура Java-кода обрабатываются в 10 потоках",
+        : "Извлекаем изменения файлов и сведения о коде",
       state: stateFor(3),
     },
     {

@@ -1,3 +1,6 @@
+import { reportCitations } from "@/lib/reportGrounding";
+import { describeEvidence } from "@/lib/reportEvidence";
+import { buildActionPlanMarkdown } from "@/lib/actionPlan";
 import type { Content, TDocumentDefinitions } from "pdfmake/interfaces";
 import { riskLabel } from "@/lib/labels";
 import type { ReportSection } from "@/lib/reportContent";
@@ -10,7 +13,7 @@ import {
   type KeyNumberId,
   type ReportLayout,
 } from "@/lib/reportLayout";
-import type { CommitInsight, ReportAudience, RepositoryFacts } from "@/lib/types";
+import type { CommitInsight, ReportAudience, RepositoryFacts, ReportArtifacts } from "@/lib/types";
 import { formatDate, formatNumber } from "@/lib/utils";
 
 export interface PdfReportData {
@@ -21,6 +24,8 @@ export interface PdfReportData {
   sections: ReportSection[];
   facts: RepositoryFacts | null;
   commits: CommitInsight[];
+  artifacts?: ReportArtifacts | null;
+  repositoryUrl?: string;
 }
 
 const colors = {
@@ -76,7 +81,28 @@ export async function createReportPdfBlob(report: PdfReportData) {
   if (report.facts && hasFactBlocks(layout, report.facts, false)) {
     content.push(...factsContent(report.facts, layout));
   }
-  if (layout.attentionCommits) content.push(...attentionContent(report.commits));
+  if (layout.attentionCommits && (!report.artifacts?.coverage || report.artifacts.coverage.mode === "SOURCES_ONLY")) content.push(...attentionContent(report.commits));
+
+  if (report.artifacts) {
+    content.push(...markdownToPdfContent(buildActionPlanMarkdown(report.artifacts.actions, report.artifacts.evidence, report.repositoryUrl ?? "")));
+    content.push(heading("Источники"));
+    for (const source of report.artifacts.evidence) {
+      content.push({ id: `evidence-${source.id}`, text: `${source.id} · ${source.label}`, bold: true, fontSize: 9, margin: [0, 5, 0, 2] });
+      if (source.commitHash) content.push({ text: source.commitHash, style: "note" });
+      if (source.kind !== "COMMIT") content.push({ ul: describeEvidence(source).map(([label, value]) => `${label}: ${value}`), fontSize: 8, margin: [0, 2, 0, 5] });
+      if (source.paths.length) content.push({ text: source.paths.join(", "), style: "note" });
+    }
+    const citations = reportCitations(report.artifacts);
+    if (citations.length) content.push(heading("Фрагменты кода"));
+    for (const citation of citations) {
+      content.push({ text: `${citation.path} · ${citation.side} · ${citation.startLine}–${citation.endLine}`, bold: true, fontSize: 9, margin: [0, 8, 0, 2] });
+      content.push({ text: `${citation.commitHash} · ${citation.evidenceId}`, style: "note" });
+      content.push({ text: citation.code, fontSize: 8, preserveLeadingSpaces: true, margin: [0, 3, 0, 8] });
+    }
+    content.push(heading("Проверка источников"));
+    content.push({ ul: [...report.artifacts.quality.checks], fontSize: 9 });
+    for (const warning of report.artifacts.coverage ? [] : report.artifacts.quality.warnings) content.push({ text: warning, style: "note", margin: [0, 5, 0, 0] });
+  }
 
   const definition: TDocumentDefinitions = {
     info: {
@@ -384,13 +410,16 @@ function markdownToPdfContent(markdown: string): Content[] {
 function richText(value: string, extra: Record<string, unknown> = {}): Content {
   const cleaned = value
     .replace(/!\[([^\]]*)]\([^)]+\)/g, "$1")
-    .replace(/\[([^\]]+)]\((?!\s)[^)]+\)/g, "$1")
     .replace(/<[^>]+>/g, "");
 
   const runs = cleaned
-    .split(/(\*\*[^*]+\*\*|`[^`]+`)/g)
+    .split(/(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|`[^`]+`)/g)
     .filter(Boolean)
     .map((part) => {
+      const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(part);
+      if (link) return { text: link[1].replace(/`/g, ""), color: "#175cd3",
+        ...(link[2].startsWith("#evidence-") ? { linkToDestination: link[2].slice(1) }
+          : /^https?:\/\//.test(link[2]) ? { link: link[2] } : {}) };
       if (part.length > 4 && part.startsWith("**") && part.endsWith("**")) {
         const inner = part.slice(2, -2);
         if (FINDING_TAG.test(inner)) {

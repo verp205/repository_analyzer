@@ -61,6 +61,13 @@ public class CommitDiscoveryService {
             }
         }
 
+        Set<String> reachable = discoveredCommits.stream().map(GitCommit::commitHash)
+                .collect(java.util.stream.Collectors.toSet());
+        for (RepositoryCommit commit : commitsByHash.values()) {
+            commit.setReachable(reachable.contains(commit.getCommitHash()));
+        }
+        commitRepository.saveAll(commitsByHash.values());
+
         saveMissingParents(taskId, discoveredCommits, commitsByHash);
         return newCommits.size();
     }
@@ -69,7 +76,7 @@ public class CommitDiscoveryService {
         Map<String, RepositoryCommit> commitsByHash = new HashMap<>();
 
         for (RepositoryCommit commit
-                : commitRepository.findAllByAnalysisTask_Id(taskId)) {
+                : commitRepository.findStoredByTask(taskId)) {
             commitsByHash.put(commit.getCommitHash(), commit);
         }
 

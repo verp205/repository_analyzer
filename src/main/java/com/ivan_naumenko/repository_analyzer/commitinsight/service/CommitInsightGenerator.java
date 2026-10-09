@@ -107,8 +107,9 @@ public class CommitInsightGenerator {
         Map<Integer, PullRequestContext> pullRequests = new HashMap<>();
         Map<String, CommitInsightDraft> parsed;
         try {
+            var loaded = contextService.loadAll(commits.stream().map(CommitChangeSummary::commitId).toList());
             List<CompactCommitContext> contexts = commits.stream()
-                    .map(commit -> contextService.load(commit.commitId()))
+                    .map(commit -> loaded.get(commit.commitId()))
                     .toList();
             Map<String, PullRequestContext> byHash = new LinkedHashMap<>();
             for (CommitChangeSummary commit : commits) {

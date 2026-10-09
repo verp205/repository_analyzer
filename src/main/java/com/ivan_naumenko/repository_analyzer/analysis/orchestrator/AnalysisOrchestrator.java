@@ -153,6 +153,8 @@ public class AnalysisOrchestrator {
                             commits
                     )
             );
+            analysisTaskService.recordDiscovery(taskId,
+                    commits.isEmpty() ? null : commits.getFirst().commitHash(), savedCommits);
 
             log.info(
                     "Для задачи {} обнаружено {} коммитов, новых сохранено {}",

@@ -80,7 +80,7 @@ public class RepositoryFactsService {
                 .map(CommitChangeSummary::commitId)
                 .collect(Collectors.toSet());
         Map<Integer, CommitInsightDraft> insights = new HashMap<>();
-        insightService.findDrafts(taskId).forEach((commitId, draft) -> {
+        insightService.findDrafts(taskId, commits.stream().map(CommitChangeSummary::commitId).toList()).forEach((commitId, draft) -> {
             if (commitIds.contains(commitId)) {
                 insights.put(commitId, draft);
             }

@@ -9,6 +9,9 @@ import {
 } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { useMemo, useState } from "react";
+import { ActionPlan } from "@/components/report/ActionPlan";
+import { GroundedFindings, ReviewCoverage } from "@/components/report/GroundedFindings";
+import { EvidencePanel } from "@/components/report/EvidencePanel";
 import { CommitInsightList } from "@/components/report/CommitInsightList";
 import { ExportMenu } from "@/components/report/ExportMenu";
 import { KeyNumbers, ReportFacts } from "@/components/report/ReportFacts";
@@ -50,6 +53,7 @@ export function ReportPanel({
   const reduceMotion = useReducedMotion();
   const [exporting, setExporting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [selectedEvidence, setSelectedEvidence] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const content = report?.content ?? "";
   const parsed = useMemo(() => parseReportSections(content), [content]);
@@ -87,7 +91,7 @@ export function ReportPanel({
     facts?.firstCommitAt && facts.lastCommitAt
       ? `коммиты с ${formatDate(facts.firstCommitAt)} по ${formatDate(facts.lastCommitAt)}`
       : null;
-  const meta = [statusText, `период: ${report.period.label}`, dates]
+  const meta = [statusText, `версия анализа: ${report.analysisRevision}`, report.headCommitHash?.slice(0, 10), `период: ${report.period.label}`, dates]
     .filter(Boolean)
     .join(" · ");
   const summaryMarkdown = parsed.summary.map((item) => `- ${item}`).join("\n");
@@ -102,10 +106,12 @@ export function ReportPanel({
     .join("-");
 
   const toc = [
+    ...(report.artifacts?.coverage ? [{ id: "report-coverage", title: "Покрытие проверки" }] : []),
     ...(parsed.summary.length > 0 ? [{ id: "report-summary", title: "Главное" }] : []),
     ...(facts ? [{ id: "report-numbers", title: "Ключевые показатели" }] : []),
-    ...parsed.sections.map((section) => ({ id: section.id, title: section.title })),
+    ...parsed.sections.filter(section => !report.artifacts?.coverage || section.title !== "Покрытие проверки").map((section) => ({ id: section.id, title: section.title })),
     ...(showFacts ? [{ id: "report-facts", title: "Показатели за период" }] : []),
+    ...(report.artifacts ? [{ id: "report-actions", title: "План действий" }, { id: "report-evidence", title: "Источники" }] : []),
     { id: "report-commits", title: "Коммиты" },
   ];
 
@@ -119,6 +125,7 @@ export function ReportPanel({
       facts,
       commits,
       repositoryUrl,
+      artifacts: report?.artifacts ?? null,
     });
   }
 
@@ -134,6 +141,8 @@ export function ReportPanel({
         sections: parsed.sections,
         facts,
         commits,
+        artifacts: report?.artifacts ?? null,
+        repositoryUrl,
       });
       downloadBlob(blob, `${fileBaseName}.pdf`);
     } catch (error) {
@@ -175,7 +184,7 @@ export function ReportPanel({
       }}
     >
       <header className="border-b border-line px-5 py-5 sm:px-8 sm:py-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:flex-wrap">
           <div className="flex min-w-0 flex-1 items-start gap-3">
             <span className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
               <FileText className="size-4" />
@@ -286,6 +295,13 @@ export function ReportPanel({
         </nav>
 
         <div className="min-w-0 space-y-10">
+          {report.artifacts?.coverage && <ReviewCoverage artifacts={report.artifacts} />}
+          {report.artifacts && !report.artifacts.coverage && <details className="rounded-xl border border-line bg-panel-strong p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-ink">Проверка источников: {report.artifacts.quality.validatedFindings} выводов и {report.artifacts.quality.validatedActions} задач</summary>
+            <ul className="mt-3 space-y-1 text-xs text-muted">{report.artifacts.quality.checks.map(check => <li key={check}>✓ {check}</li>)}</ul>
+            {report.artifacts.quality.warnings.map(warning => <p className="mt-3 text-xs leading-5 text-muted" key={warning}>{warning}</p>)}
+          </details>}
+
           {parsed.summary.length > 0 && (
             <section
               className="report-anchor rounded-2xl border border-line bg-panel-strong p-5 sm:p-6"
@@ -297,6 +313,7 @@ export function ReportPanel({
                 commits={commits}
                 markdown={summaryMarkdown}
                 repositoryUrl={repositoryUrl}
+                onEvidence={setSelectedEvidence}
               />
             </section>
           )}
@@ -304,15 +321,18 @@ export function ReportPanel({
           {facts && <KeyNumbers facts={facts} layout={layout} />}
 
           {parsed.sections.length > 0
-            ? parsed.sections.map((section) => (
+            ? parsed.sections.filter(section => !report.artifacts?.coverage || section.title !== "Покрытие проверки").map((section) => (
                 <section className="report-anchor" id={section.id} key={section.id}>
                   <h3 className="report-section-title">{section.title}</h3>
-                  <ReportMarkdown
+                  {report.artifacts?.coverage
+                    ? <GroundedFindings findings={report.artifacts.sections.find(item => item.title === section.title)?.findings ?? []} onEvidence={setSelectedEvidence} />
+                    : <ReportMarkdown
                     className="max-w-3xl"
                     commits={commits}
                     markdown={section.body}
                     repositoryUrl={repositoryUrl}
-                  />
+                    onEvidence={setSelectedEvidence}
+                  />}
                 </section>
               ))
             : inProgress && (
@@ -325,7 +345,18 @@ export function ReportPanel({
 
           {facts && showFacts && <ReportFacts facts={facts} layout={layout} />}
 
+          {report.artifacts && <>
+            <ActionPlan key={`${report.id}:${report.updatedAt}`} actions={report.artifacts.actions} evidence={report.artifacts.evidence}
+              reportId={report.id} repositoryUrl={repositoryUrl} onEvidence={setSelectedEvidence} />
+            <EvidencePanel key={report.id} reportId={report.id} repositoryUrl={repositoryUrl}
+              evidence={report.artifacts.evidence.filter(source => source.id === "F1" || source.id === "S1" ||
+                [...report.artifacts!.summary, ...report.artifacts!.sections.flatMap(section => section.findings), ...report.artifacts!.actions]
+                  .some(item => item.evidenceIds.includes(source.id)))}
+              selectedId={selectedEvidence} onSelect={setSelectedEvidence} />
+          </>}
+
           <CommitInsightList
+            preliminary={!!report.artifacts?.coverage && report.artifacts.coverage.mode !== "SOURCES_ONLY"}
             commits={commits}
             defaultOpen={inProgress}
             repositoryUrl={repositoryUrl}

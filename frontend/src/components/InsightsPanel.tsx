@@ -1,14 +1,13 @@
 import { GitCommitHorizontal, GitMerge, Route, Split } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { CommitGraphTree } from "@/components/CommitGraphTree";
+import { CommitClusterChart } from "@/components/CommitClusterChart";
 import type { CommitClusters, CommitGraph } from "@/lib/types";
 
 interface InsightsPanelProps {
   graph: CommitGraph;
   clusters: CommitClusters;
 }
-
-const clusterColors = ["#b98e68", "#7f9882", "#b47d78", "#8b84a4", "#c1a65f"];
 
 export function InsightsPanel({ graph, clusters }: InsightsPanelProps) {
   const reduceMotion = useReducedMotion();
@@ -18,11 +17,6 @@ export function InsightsPanel({ graph, clusters }: InsightsPanelProps) {
     { label: "Концы веток", value: graph.tipCount, icon: Split },
     { label: "Слияния", value: graph.mergeCommitCount, icon: GitMerge },
   ];
-  const maxClusterSize = Math.max(
-    1,
-    ...clusters.clusters.map((cluster) => cluster.commits.length),
-  );
-
   return (
     <section className="grid min-w-0 items-start gap-4 lg:grid-cols-[1.2fr_0.8fr]">
       <motion.div
@@ -66,29 +60,8 @@ export function InsightsPanel({ graph, clusters }: InsightsPanelProps) {
         <h2 className="mt-1 font-display text-xl font-semibold text-ink">
           Над чем велась работа
         </h2>
-        <div className="mt-6 space-y-5">
-          {clusters.clusters.length === 0 && (
-            <p className="text-sm text-muted">Пока нет завершённых изменений для группировки.</p>
-          )}
-          {clusters.clusters.map((cluster, index) => (
-            <div key={cluster.type}>
-              <div className="mb-2 flex items-center justify-between gap-4 text-sm">
-                <span className="font-medium text-ink">{cluster.displayName}</span>
-                <span className="text-xs text-muted">
-                  Коммитов: {cluster.commits.length}
-                </span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-accent-soft">
-                <div
-                  className="progress-fill h-full rounded-full transition-[width] duration-700 motion-reduce:transition-none"
-                  style={{
-                    backgroundColor: clusterColors[index % clusterColors.length],
-                    width: `${Math.max(8, (cluster.commits.length / maxClusterSize) * 100)}%`,
-                  }}
-                />
-              </div>
-            </div>
-          ))}
+        <div className="mt-6">
+          <CommitClusterChart clusters={clusters.clusters} />
         </div>
       </motion.div>
     </section>

@@ -1,8 +1,15 @@
 package com.ivan_naumenko.repository_analyzer.report.snapshot;
 
 import com.ivan_naumenko.repository_analyzer.git.service.GitService;
+import com.ivan_naumenko.repository_analyzer.cache.BoundedSingleFlightCache;
+import com.ivan_naumenko.repository_analyzer.code.TextCodeLanguages;
 import com.ivan_naumenko.repository_analyzer.report.snapshot.RepositorySnapshot.ModuleFact;
 import com.ivan_naumenko.repository_analyzer.report.snapshot.RepositorySnapshot.SecurityFacts;
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.treewalk.TreeWalk;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -48,13 +55,10 @@ public class RepositorySnapshotService {
             ".git", ".idea", ".gradle", ".mvn", ".next", "node_modules", "target",
             "build", "dist", "out", "vendor", "coverage"
     );
-    private static final Set<String> CODE_EXTENSIONS = Set.of(
-            "java", "kt", "scala", "groovy", "ts", "tsx", "js", "jsx", "py", "go",
-            "cs", "rb", "php", "rs", "swift", "cpp", "c"
-    );
     private static final Pattern README = Pattern.compile("(?i)readme(\\.(md|rst|txt|adoc))?");
     private static final Pattern TEST_PATH = Pattern.compile(
             "(^|/)(?i:src/test|test|tests|__tests__|spec)/|(Test|Tests|IT)\\.[a-z]+$|\\.(test|spec)\\.[a-z]+$"
+                    + "|_test\\.go$|(^|/)test_[^/]+\\.py$|_spec\\.rb$"
     );
     private static final Pattern CONTROLLER = Pattern.compile("@(Rest)?Controller\\b");
     private static final Pattern SECURITY_CONFIGURATION = Pattern.compile(
@@ -90,10 +94,34 @@ public class RepositorySnapshotService {
     private static final Map<String, String> DEPENDENCY_LABELS = dependencyLabels();
 
     private final GitService gitService;
+    private final BoundedSingleFlightCache<String, RepositorySnapshot> snapshots = new BoundedSingleFlightCache<>(32);
+
+    public String headCommitHash(String repositoryUrl, String branch) {
+        try (Git git = Git.open(gitService.getRepositoryPath(repositoryUrl, branch).toFile())) {
+            var head = git.getRepository().resolve("HEAD");
+            return head == null ? null : head.name();
+        } catch (IOException | RuntimeException exception) {
+            return null;
+        }
+    }
 
     public RepositorySnapshot capture(String repositoryUrl, String branch) {
+        return capture(repositoryUrl, branch, null);
+    }
+
+    public RepositorySnapshot capture(String repositoryUrl, String branch, String commitHash) {
+        Path root;
         try {
-            return scan(gitService.getRepositoryPath(repositoryUrl, branch));
+            root = gitService.getRepositoryPath(repositoryUrl, branch);
+            try (Git git = Git.open(root.toFile())) {
+                ObjectId head = commitHash == null ? git.getRepository().resolve("HEAD") : ObjectId.fromString(commitHash);
+                if (head == null) return RepositorySnapshot.unavailable();
+                String key = root.toRealPath() + ":" + head.name();
+                return snapshots.get(key, () -> {
+                    try { return scanCommit(git.getRepository(), head); }
+                    catch (IOException exception) { throw new java.io.UncheckedIOException(exception); }
+                });
+            }
         } catch (IOException | RuntimeException exception) {
             log.warn("Не удалось собрать состояние кода {} ({}): {}", repositoryUrl, branch, exception.getMessage());
             return RepositorySnapshot.unavailable();
@@ -102,8 +130,32 @@ public class RepositorySnapshotService {
 
     RepositorySnapshot scan(Path root) throws IOException {
         List<String> files = listFiles(root);
+        return scan(files, new Reader(root));
+    }
+
+    private RepositorySnapshot scanCommit(Repository repository, ObjectId head) throws IOException {
+        Map<String, ObjectId> blobs = new HashMap<>();
+        try (RevWalk walk = new RevWalk(repository); TreeWalk tree = new TreeWalk(repository)) {
+            tree.addTree(walk.parseCommit(head).getTree());
+            while (tree.next()) {
+                if (tree.isSubtree()) {
+                    if (!SKIPPED_DIRECTORIES.contains(tree.getNameString())) tree.enterSubtree();
+                    continue;
+                }
+                String path = tree.getPathString();
+                if (tree.getFileMode(0).getObjectType() != org.eclipse.jgit.lib.Constants.OBJ_BLOB
+                        || tree.getFileMode(0).equals(org.eclipse.jgit.lib.FileMode.SYMLINK)) continue;
+                blobs.put(path, tree.getObjectId(0));
+                if (blobs.size() >= MAX_VISITED_FILES) break;
+            }
+        }
+        List<String> files = new ArrayList<>(blobs.keySet());
+        files.sort(Comparator.comparingInt((String path) -> path.split("/").length).thenComparing(path -> path));
+        return scan(files, new Reader(repository, blobs));
+    }
+
+    private RepositorySnapshot scan(List<String> files, Reader reader) {
         boolean truncated = files.size() >= MAX_VISITED_FILES;
-        Reader reader = new Reader(root);
 
         Set<String> stack = new LinkedHashSet<>();
         boolean securityDependency = detectStack(files, reader, stack);
@@ -111,7 +163,7 @@ public class RepositorySnapshotService {
         List<String> mainCode = new ArrayList<>();
         int testCode = 0;
         for (String file : files) {
-            if (CODE_EXTENSIONS.contains(extension(file))) {
+            if (TextCodeLanguages.knownSource(file) && !isIgnoredText(file)) {
                 if (TEST_PATH.matcher(file).find()) {
                     testCode++;
                 } else {
@@ -148,9 +200,32 @@ public class RepositorySnapshotService {
                 .limit(MAX_LISTED)
                 .toList();
 
+        String description = description(files, reader);
+        List<String> originalSources = reader.cache.entrySet().stream().filter(entry -> entry.getValue() != null)
+                .map(Map.Entry::getKey).sorted().limit(100).toList();
+        // A few actual source files provide evidence for non-Java repositories too.
+        mainCode.stream().filter(file -> !file.endsWith(".java") && !file.endsWith(".kt")).limit(40).forEach(reader::read);
+        Map<String, Integer> languageCounts = new java.util.TreeMap<>();
+        for (String file : files) {
+            if (isIgnoredText(file)) continue;
+            String language = TextCodeLanguages.detect(file, null);
+            if (language.startsWith("Text")) {
+                String content = reader.read(file);
+                if (content == null) continue;
+                language = TextCodeLanguages.detect(file, content);
+                if (!language.equals("Binary") && (TextCodeLanguages.source(file, content) || language.equals("Text"))) {
+                    if (TEST_PATH.matcher(file).find()) testCode++;
+                    else mainCode.add(file);
+                }
+            }
+            if (TextCodeLanguages.source(file, reader.cache.get(file)) || language.equals("Text")) languageCounts.merge(language, 1, Integer::sum);
+        }
+        List<String> sourcePaths = java.util.stream.Stream.concat(originalSources.stream(), reader.cache.entrySet().stream()
+                .filter(entry -> entry.getValue() != null).map(Map.Entry::getKey).sorted()).distinct().limit(100).toList();
+
         return new RepositorySnapshot(
                 true,
-                description(files, reader),
+                description,
                 List.copyOf(stack),
                 modules(mainCode),
                 mainCode.size(),
@@ -166,8 +241,30 @@ public class RepositorySnapshotService {
                         config.secrets(),
                         envFiles
                 ),
-                truncated || reader.limitReached()
+                truncated || reader.limitReached(),
+                sourcePaths,
+                languageCounts.entrySet().stream().map(entry -> new RepositorySnapshot.LanguageFact(entry.getKey(), entry.getValue())).toList(),
+                files.stream().filter(this::isManifest).toList(),
+                "Diff всех текстовых файлов, включая неизвестные расширения. Java — дополнительный AST-разбор. "
+                        + "Снимок — текстовые признаки, проверки защиты Spring относятся только к Java/Kotlin. "
+                        + "Код и тесты не запускались; отсутствие признака не доказывает отсутствие риска."
         );
+    }
+
+    private boolean isIgnoredText(String file) {
+        String name = fileName(file).toLowerCase(Locale.ROOT);
+        if (isManifest(file) && !Set.of("build.gradle", "build.gradle.kts", "setup.py", "Dockerfile", "Makefile").contains(fileName(file))) return true;
+        return name.endsWith(".lock") || name.equals("package-lock.json") || name.endsWith(".svg")
+                || name.equals(".env") || name.startsWith(".env.") || name.endsWith(".csproj") || name.endsWith(".fsproj")
+                || name.endsWith(".adoc") || name.startsWith("license") || name.equals(".gitignore");
+    }
+
+    private boolean isManifest(String path) {
+        String name = fileName(path);
+        return Set.of("pom.xml", "build.gradle", "build.gradle.kts", "package.json", "pyproject.toml", "requirements.txt",
+                "Pipfile", "setup.py", "setup.cfg", "go.mod", "Cargo.toml", "Gemfile", "composer.json", "Package.swift",
+                "pubspec.yaml", "CMakeLists.txt", "Makefile", "Dockerfile").contains(name)
+                || name.endsWith(".csproj") || name.endsWith(".fsproj");
     }
 
     private List<String> listFiles(Path root) throws IOException {
@@ -207,7 +304,20 @@ public class RepositorySnapshotService {
                 stack.add("Maven");
             } else if (name.equals("build.gradle") || name.equals("build.gradle.kts")) {
                 stack.add("Gradle");
-            } else if (!name.equals("package.json")) {
+            } else if (isManifest(file)) {
+                if (Set.of("pyproject.toml", "requirements.txt", "Pipfile", "setup.py", "setup.cfg").contains(name)) stack.add("Python");
+                if (name.equals("go.mod")) stack.add("Go modules");
+                if (name.equals("Cargo.toml")) stack.add("Rust / Cargo");
+                if (name.equals("Gemfile")) stack.add("Ruby / Bundler");
+                if (name.equals("composer.json")) stack.add("PHP / Composer");
+                if (name.endsWith(".csproj") || name.endsWith(".fsproj")) stack.add(".NET");
+                if (name.equals("Package.swift")) stack.add("Swift Package Manager");
+                if (name.equals("pubspec.yaml")) stack.add("Dart / pub");
+                if (name.equals("CMakeLists.txt")) stack.add("CMake");
+                if (name.equals("Makefile")) stack.add("Make");
+                if (name.equals("Dockerfile")) stack.add("Docker");
+                if (name.equals("package.json")) stack.add("Node.js");
+            } else {
                 if (name.equals("Dockerfile") || name.matches("(docker-)?compose.*\\.ya?ml")) {
                     stack.add("Docker");
                 }
@@ -496,12 +606,22 @@ public class RepositorySnapshotService {
     private static final class Reader {
 
         private final Path root;
+        private final Repository repository;
+        private final Map<String, ObjectId> blobs;
         private final Map<String, String> cache = new HashMap<>();
         private int reads;
         private boolean limitReached;
 
         private Reader(Path root) {
             this.root = root;
+            this.repository = null;
+            this.blobs = Map.of();
+        }
+
+        private Reader(Repository repository, Map<String, ObjectId> blobs) {
+            this.root = null;
+            this.repository = repository;
+            this.blobs = blobs;
         }
 
         String read(String file) {
@@ -515,10 +635,16 @@ public class RepositorySnapshotService {
             reads++;
             String text = null;
             try {
-                Path path = root.resolve(file);
-                if (Files.size(path) <= MAX_FILE_BYTES) {
-                    text = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+                if (repository != null) {
+                    var blob = repository.open(blobs.get(file));
+                    if (blob.getSize() <= MAX_FILE_BYTES) text = new String(blob.getBytes(), StandardCharsets.UTF_8);
+                    else limitReached = true;
+                } else {
+                    Path path = root.resolve(file);
+                    if (Files.size(path) <= MAX_FILE_BYTES) text = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+                    else limitReached = true;
                 }
+                if (text != null && text.indexOf('\0') >= 0) text = null;
             } catch (IOException ignored) {
                 // Недоступный файл просто не участвует в сводке.
             }

@@ -106,7 +106,7 @@ public record LlmProperties(
                     jsonMode,
                     commitTimeoutMillis
             );
-            case COMMIT_BATCH -> new LlmRequestOptions(
+            case COMMIT_BATCH, GROUNDED_REVIEW, GROUNDED_VERIFY -> new LlmRequestOptions(
                     commitBatchMaxTokens,
                     commitReasoningEffort,
                     jsonMode,
@@ -121,7 +121,7 @@ public record LlmProperties(
             case SYNTHESIS_FINAL -> new LlmRequestOptions(
                     synthesisFinalMaxTokens,
                     synthesisFinalReasoningEffort,
-                    false,
+                    jsonMode,
                     synthesisTimeoutMillis
             );
         };

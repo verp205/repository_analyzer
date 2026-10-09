@@ -34,6 +34,13 @@ public class LlmCacheService {
     }
 
     @Transactional
+    public void discardResponse(String promptHash, String rejectedResponse) {
+        validateHash(promptHash);
+        repository.findById(promptHash).filter(entry -> entry.getResponseText().equals(rejectedResponse))
+                .ifPresent(repository::delete);
+    }
+
+    @Transactional
     public String saveResponse(
             String promptHash,
             String cacheNamespace,

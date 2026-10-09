@@ -210,6 +210,13 @@ class GitServiceTest {
                         gitFilePath
                 )
         );
+        var together = gitService.readFilesAtCommit(clonedRepository, firstCommitHash,
+                List.of(gitFilePath, "README.md", gitFilePath));
+        assertEquals(2, together.size());
+        assertEquals(firstContent, together.get(gitFilePath));
+        assertEquals(gitService.readFileAtCommit(clonedRepository, firstCommitHash, "README.md"), together.get("README.md"));
+        assertThrows(IllegalArgumentException.class, () -> gitService.readFilesAtCommit(clonedRepository,
+                firstCommitHash, List.of(gitFilePath, "../README.md")));
     }
 
     @Test

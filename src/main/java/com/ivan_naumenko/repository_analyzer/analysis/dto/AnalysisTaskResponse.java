@@ -25,4 +25,13 @@ public class AnalysisTaskResponse {
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;
+
+    private int revision;
+    private String headCommitHash;
+    private int addedCommits;
+
+    public AnalysisTaskResponse(Integer id, String repositoryUrl, String branch,
+                                AnalysisTaskStatus status, LocalDateTime createdAt, LocalDateTime updatedAt) {
+        this(id, repositoryUrl, branch, status, createdAt, updatedAt, 0, null, 0);
+    }
 }

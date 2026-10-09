@@ -28,6 +28,15 @@ public class AnalysisTask {
     @Enumerated(EnumType.STRING)
     private AnalysisTaskStatus status;
 
+    @Column(name = "revision", nullable = false)
+    private int revision;
+
+    @Column(name = "head_commit_hash")
+    private String headCommitHash;
+
+    @Column(name = "added_commits", nullable = false)
+    private int addedCommits;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 

@@ -12,46 +12,41 @@ import {
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   type MouseEvent as ReactMouseEvent,
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useRef,
+  useLayoutEffect,
   useState,
 } from "react";
 import { flushSync } from "react-dom";
 import { AnalysisTimeline } from "@/components/AnalysisTimeline";
 import { GitCredentialsFields } from "@/components/GitCredentialsFields";
 import { HelpAccordion } from "@/components/HelpAccordion";
-import { InsightsPanel } from "@/components/InsightsPanel";
 import { RecentAnalyses } from "@/components/RecentAnalyses";
 import {
   RepositoryForm,
   type AnalysisRequest,
 } from "@/components/RepositoryForm";
-import { ReportPanel } from "@/components/ReportPanel";
 import { ReportPeriodPicker } from "@/components/report/ReportPeriodPicker";
 import { AudienceSelect } from "@/components/ui/audience-select";
 import { FlowHoverButton } from "@/components/ui/flow-hover-button";
 import { api } from "@/lib/api";
+import { useReportWorkspace } from "@/hooks/useReportWorkspace";
 import { ALL_TIME_PERIOD, periodKey } from "@/lib/reportPeriod";
 import type {
   AnalysisProgress,
-  AnalysisReport,
   AnalysisTask,
   AnalysisTaskStatus,
-  CommitClusters,
-  CommitGraph,
-  CommitInsight,
-  GitTag,
   ReportAudience,
-  ReportEvent,
   ReportPeriod,
-  ReportStatus,
-  RepositoryFacts,
 } from "@/lib/types";
 import { repositoryName } from "@/lib/utils";
 
 type Theme = "light" | "dark";
+const InsightsPanel = lazy(() => import("@/components/InsightsPanel").then(module => ({ default: module.InsightsPanel })));
+const ReportPanel = lazy(() => import("@/components/ReportPanel").then(module => ({ default: module.ReportPanel })));
 type ConnectionStatus = "checking" | "online" | "offline";
 type ThemeRipple = {
   color: string;
@@ -62,20 +57,6 @@ type ThemeRipple = {
 };
 
 const hiddenHistoryKey = "repository-analyzer-hidden-history";
-const terminalReportStatuses: ReportStatus[] = [
-  "COMPLETED",
-  "FAILED",
-  "CANCELLED",
-];
-const reportEventNames = [
-  "snapshot",
-  "started",
-  "progress",
-  "synthesis",
-  "completed",
-  "failed",
-  "cancelled",
-];
 const cancellableTaskStatuses: AnalysisTaskStatus[] = [
   "NEW",
   "CLONING",
@@ -123,28 +104,22 @@ export default function App() {
   const [tasks, setTasks] = useState<AnalysisTask[]>([]);
   const [hiddenTaskIds, setHiddenTaskIds] =
     useState<number[]>(initialHiddenTaskIds);
+  const selectionVersion = useRef(0);
   const [task, setTask] = useState<AnalysisTask | null>(null);
   const [progress, setProgress] = useState<AnalysisProgress | null>(null);
-  const [graph, setGraph] = useState<CommitGraph | null>(null);
-  const [clusters, setClusters] = useState<CommitClusters | null>(null);
-  const [report, setReport] = useState<AnalysisReport | null>(null);
-  const [facts, setFacts] = useState<RepositoryFacts | null>(null);
-  const [commitInsights, setCommitInsights] = useState<CommitInsight[]>([]);
   const [audience, setAudience] = useState<ReportAudience>("DEVELOPER");
   const [period, setPeriod] = useState<ReportPeriod>(ALL_TIME_PERIOD);
-  const [tags, setTags] = useState<GitTag[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [cancellingReport, setCancellingReport] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>("checking");
-  const reportRequestKey = useRef("");
-  const restartingRecoveredReportId = useRef<number | null>(null);
   const taskId = task?.id ?? null;
   const taskStatus = task?.status ?? null;
-  const reportId = report?.id ?? null;
-  const reportStatus = report?.status ?? null;
+  const { graph, clusters, report, facts, commitInsights, tags, cancellingReport,
+    resetWorkspace, retryReport, cancelReport, availableReports, selectReport } = useReportWorkspace(task, audience, period, setError);
+  const [refreshing, setRefreshing] = useState(false);
+
 
   useLayoutEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -245,177 +220,15 @@ export default function App() {
     };
   }, [taskId, taskStatus, progress?.processingCommits, refreshTasks]);
 
-  useEffect(() => {
-    if (!taskId || taskStatus !== "COMPLETED") return;
-    const key = `${taskId}:${audience}:${periodKey(period)}`;
-    if (reportRequestKey.current === key) return;
-    reportRequestKey.current = key;
-
-    let disposed = false;
-    const prepareResults = async () => {
-      try {
-        const [nextGraph, nextClusters, nextReport] = await Promise.all([
-          api.getGraph(taskId),
-          api.getClusters(taskId),
-          api.createReport(taskId, audience, period),
-        ]);
-        // Показатели и коммиты — в границах периода отчёта.
-        const [nextFacts, nextInsights] = await Promise.all([
-          api.getReportFacts(nextReport.id),
-          api.getReportCommitInsights(nextReport.id),
-        ]);
-        if (disposed) return;
-        setGraph(nextGraph);
-        setClusters(nextClusters);
-        setFacts(nextFacts);
-        setCommitInsights(nextInsights);
-        setReport(nextReport);
-      } catch (caught) {
-        if (!disposed) {
-          reportRequestKey.current = "";
-          setError(errorMessage(caught));
-        }
-      }
-    };
-
-    void prepareResults();
-    return () => {
-      disposed = true;
-    };
-  }, [taskId, taskStatus, audience, period]);
-
-  useEffect(() => {
-    if (!taskId || taskStatus !== "COMPLETED") return;
-    let disposed = false;
-    void api
-      .getTags(taskId)
-      .then((nextTags) => {
-        if (!disposed) setTags(nextTags);
-      })
-      .catch(() => undefined);
-    return () => {
-      disposed = true;
-    };
-  }, [taskId, taskStatus]);
-
-  const refreshReport = useCallback(async (reportId: number) => {
-    const fresh = await api.getReport(reportId);
-    setReport(fresh);
-    if (terminalReportStatuses.includes(fresh.status)) {
-      const [nextFacts, nextInsights] = await Promise.all([
-        api.getReportFacts(fresh.id),
-        api.getReportCommitInsights(fresh.id),
-      ]);
-      setFacts(nextFacts);
-      setCommitInsights(nextInsights);
-    }
-    return fresh;
-  }, []);
-
-  useEffect(() => {
-    if (
-      !report ||
-      report.status !== "NEW" ||
-      taskStatus !== "COMPLETED" ||
-      restartingRecoveredReportId.current === report.id
-    ) {
-      return;
-    }
-
-    restartingRecoveredReportId.current = report.id;
-    let disposed = false;
-    void api
-      .createReport(report.analysisTaskId, report.audience, report.period)
-      .then((restarted) => {
-        if (disposed) return;
-        if (restarted.status !== "NEW") {
-          restartingRecoveredReportId.current = null;
-        }
-        setReport(restarted);
-      })
-      .catch((caught) => {
-        if (disposed) return;
-        restartingRecoveredReportId.current = null;
-        setError(errorMessage(caught));
-      });
-
-    return () => {
-      disposed = true;
-    };
-  }, [report, taskStatus]);
-
-  useEffect(() => {
-    if (
-      !reportId ||
-      reportStatus === "COMPLETED" ||
-      reportStatus === "FAILED" ||
-      reportStatus === "CANCELLED"
-    ) {
-      return;
-    }
-
-    const source = new EventSource(api.reportEventsUrl(reportId));
-    let fallbackTimer: ReturnType<typeof setInterval> | null = null;
-
-    const handleEvent = (message: MessageEvent<string>) => {
-      const event = JSON.parse(message.data) as ReportEvent;
-      setReport((current) =>
-        current && current.id === event.reportId
-          ? {
-              ...current,
-              processedCommits: event.processedCommits,
-              totalCommits: event.totalCommits || current.totalCommits,
-            }
-          : current,
-      );
-
-      if (event.commits?.length) {
-        setCommitInsights((current) => mergeInsights(current, event.commits));
-      }
-      if (event.type === "SNAPSHOT") {
-        // После (пере)подключения догружаем то, что могло прийти без нас.
-        void refreshReport(event.reportId).catch(() => undefined);
-        void api
-          .getReportCommitInsights(event.reportId)
-          .then(setCommitInsights)
-          .catch(() => undefined);
-      } else if (event.status && terminalReportStatuses.includes(event.status)) {
-        void refreshReport(event.reportId).catch(() => undefined);
-      }
-    };
-
-    reportEventNames.forEach((eventName) =>
-      source.addEventListener(eventName, handleEvent),
-    );
-
-    // Опрос нужен только если SSE-соединение закрыто окончательно.
-    source.onerror = () => {
-      if (source.readyState === EventSource.CLOSED && !fallbackTimer) {
-        fallbackTimer = setInterval(() => {
-          void refreshReport(reportId).catch(() => undefined);
-        }, 4000);
-      }
-    };
-
-    return () => {
-      if (fallbackTimer) clearInterval(fallbackTimer);
-      source.close();
-    };
-  }, [reportId, reportStatus, refreshReport]);
-
   async function startAnalysis(request: AnalysisRequest) {
+    const selectedVersion = ++selectionVersion.current;
     setSubmitting(true);
+    setTask(null);
+    resetWorkspace();
     setError(null);
     setAudience(request.audience);
     setPeriod(ALL_TIME_PERIOD);
-    setTags([]);
     setProgress(null);
-    setGraph(null);
-    setClusters(null);
-    setReport(null);
-    setFacts(null);
-    setCommitInsights([]);
-    reportRequestKey.current = "";
 
     try {
       const created = await api.createTask(
@@ -424,6 +237,7 @@ export default function App() {
         request.gitUsername,
         request.gitAccessToken,
       );
+      if (selectionVersion.current !== selectedVersion) return;
       setTask(created);
       setHiddenTaskIds((current) => current.filter((id) => id !== created.id));
       void refreshTasks();
@@ -445,15 +259,26 @@ export default function App() {
       );
       setRetryGitAccessToken("");
       setTask(retried);
-      setGraph(null);
-      setClusters(null);
-      setReport(null);
-      setFacts(null);
-      setCommitInsights([]);
-      reportRequestKey.current = "";
+      resetWorkspace();
     } catch (caught) {
       setError(errorMessage(caught));
     }
+  }
+
+  async function refreshAnalysis() {
+    if (!task || refreshing) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      const updated = await api.refreshTask(task.id, retryGitUsername.trim() || undefined, retryGitAccessToken || undefined);
+      setRetryGitAccessToken("");
+      setTask(updated);
+      setProgress(null);
+      resetWorkspace();
+      void refreshTasks();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally { setRefreshing(false); }
   }
 
   async function cancelTask() {
@@ -464,8 +289,7 @@ export default function App() {
     try {
       const cancelled = await api.cancelTask(task.id);
       setTask(cancelled);
-      setReport(null);
-      reportRequestKey.current = "";
+      resetWorkspace();
       void refreshTasks();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -474,63 +298,30 @@ export default function App() {
     }
   }
 
-  async function retryReport() {
-    if (!report) return;
-    setError(null);
-    try {
-      const retried = await api.retryReport(report.id);
-      setReport(retried);
-    } catch (caught) {
-      setError(errorMessage(caught));
-    }
-  }
-
-  async function cancelReport() {
-    if (!report || report.status !== "PROCESSING") return;
-    setCancellingReport(true);
-    setError(null);
-    try {
-      const cancelled = await api.cancelReport(report.id);
-      setReport(cancelled);
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setCancellingReport(false);
-    }
-  }
-
   async function openTask(selected: AnalysisTask) {
+    const selectedVersion = ++selectionVersion.current;
+    resetWorkspace();
     setTask(selected);
     setPeriod(ALL_TIME_PERIOD);
-    setTags([]);
     setProgress(null);
-    setGraph(null);
-    setClusters(null);
-    setReport(null);
-    setFacts(null);
-    setCommitInsights([]);
     setError(null);
-    reportRequestKey.current = "";
     try {
-      setProgress(await api.getProgress(selected.id));
+      const nextProgress = await api.getProgress(selected.id);
+      if (selectedVersion === selectionVersion.current) setProgress(nextProgress);
     } catch (caught) {
-      setError(errorMessage(caught));
+      if (selectedVersion === selectionVersion.current) setError(errorMessage(caught));
     }
   }
 
   function selectReportAudience(nextAudience: ReportAudience) {
     if (nextAudience === audience) return;
     setAudience(nextAudience);
-    setReport(null);
-    reportRequestKey.current = "";
   }
 
   function selectReportPeriod(nextPeriod: ReportPeriod) {
     if (periodKey(nextPeriod) === periodKey(period)) return;
     setPeriod(nextPeriod);
-    setReport(null);
     setError(null);
-    reportRequestKey.current = "";
   }
 
   function toggleTheme(event: ReactMouseEvent<HTMLButtonElement>) {
@@ -679,12 +470,10 @@ export default function App() {
             <HelpAccordion />
           </div>
 
-          <div className="diagonal-card mt-8 hidden shrink-0 lg:mt-6 lg:block">
-            <p className="text-sm font-semibold text-ink">dev. Ivan Naumenko</p>
-            <p className="mt-4 text-[10px] uppercase tracking-[0.16em] text-muted">
-              © 2026 Иван Науменко
-            </p>
-          </div>
+          <footer className="mt-8 hidden shrink-0 text-xs leading-5 text-muted lg:mt-6 lg:block">
+            <p>Иван Науменко 2026</p>
+            <p className="mt-1">MTech</p>
+          </footer>
         </motion.aside>
 
         <motion.main
@@ -854,6 +643,35 @@ export default function App() {
                       )}
                     </div>
 
+                    {availableReports.length > 1 && report && (
+                      <label className="mt-4 flex flex-wrap items-center gap-2 text-xs text-muted">
+                        Сохранённый отчёт
+                        <select aria-label="Версия отчёта" className="rounded-lg border border-line bg-panel px-3 py-2 text-ink"
+                          value={report.id} onChange={event => selectReport(Number(event.target.value))}>
+                          {availableReports.map(item => <option key={item.id} value={item.id}>
+                            Версия {item.analysisRevision} · {item.headCommitHash?.slice(0, 7) ?? "ранний анализ"}
+                          </option>)}
+                        </select>
+                      </label>
+                    )}
+
+                    {task.status === "COMPLETED" && (
+                      <div className="mt-5 space-y-3 border-t border-line pt-4">
+                        <p className="text-xs text-muted">
+                          Версия анализа {task.revision || 0}
+                          {task.headCommitHash && <> · <code>{task.headCommitHash.slice(0, 10)}</code></>}
+                          {task.revision > 1 && <> · добавлено коммитов: {task.addedCommits}</>}
+                        </p>
+                        <GitCredentialsFields accessToken={retryGitAccessToken} username={retryGitUsername}
+                          disabled={refreshing} onAccessTokenChange={setRetryGitAccessToken} onUsernameChange={setRetryGitUsername} />
+                        <FlowHoverButton disabled={refreshing} icon={<RotateCcw className="size-4" />}
+                          onClick={() => void refreshAnalysis()} type="button">
+                          {refreshing ? "Обновляем…" : "Обновить анализ"}
+                        </FlowHoverButton>
+                        <p className="text-xs text-muted">Загрузим новые коммиты. Готовый разбор будет использован повторно.</p>
+                      </div>
+                    )}
+
                     {cancellableTaskStatuses.includes(task.status) && (
                       <FlowHoverButton
                         className="mt-6 self-start border-red-300 text-red-700 before:bg-red-700 hover:text-white dark:border-red-900/70 dark:text-red-300 dark:before:bg-red-300 dark:hover:text-red-950"
@@ -915,10 +733,14 @@ export default function App() {
                 </div>
 
                 {graph && clusters && (
-                  <InsightsPanel clusters={clusters} graph={graph} />
+                  <Suspense fallback={<div aria-busy="true" className="py-6 text-sm text-[var(--muted)]">Загрузка истории изменений…</div>}>
+                    <InsightsPanel clusters={clusters} graph={graph} />
+                  </Suspense>
                 )}
 
+                <Suspense fallback={<div aria-busy="true" className="py-6 text-sm text-[var(--muted)]">Загрузка отчёта…</div>}>
                 <ReportPanel
+                  key={report?.id ?? "empty"}
                   cancelling={cancellingReport}
                   commits={commitInsights}
                   facts={facts}
@@ -926,13 +748,14 @@ export default function App() {
                   onRetry={retryReport}
                   report={report}
                 />
+                </Suspense>
               </motion.div>
             )}
 
             {!hasWorkspace && (
               <div className="mx-auto mt-7 grid max-w-4xl gap-3 sm:grid-cols-3">
                 {[
-                  [BookOpenText, "Технический контекст", "Diff и структура Java-кода до обращения к LLM"],
+                  [BookOpenText, "Технический контекст", "Diff любого текстового кода и дополнительный разбор Java"],
                   [GitFork, "Настоящая история", "Родители, ветки и смысловые группы изменений"],
                   [Sparkles, "Ролевые отчёты", "Пять вариантов отчёта для пяти точек зрения"],
                 ].map(([Icon, title, description], index) => {
@@ -962,12 +785,10 @@ export default function App() {
               <HelpAccordion />
             </div>
 
-            <div className="diagonal-card mx-auto mt-5 max-w-4xl lg:hidden">
-              <p className="text-sm font-semibold text-ink">dev. Ivan Naumenko</p>
-              <p className="mt-4 text-[10px] uppercase tracking-[0.16em] text-muted">
-                © 2026 Иван Науменко
-              </p>
-            </div>
+            <footer className="mx-auto mt-5 max-w-4xl text-xs leading-5 text-muted lg:hidden">
+              <p>Иван Науменко 2026</p>
+              <p className="mt-1">MTech</p>
+            </footer>
           </div>
         </motion.main>
       </div>
@@ -977,10 +798,4 @@ export default function App() {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Произошла непредвиденная ошибка";
-}
-
-function mergeInsights(current: CommitInsight[], incoming: CommitInsight[]) {
-  const byCommit = new Map(current.map((item) => [item.commitId, item]));
-  incoming.forEach((item) => byCommit.set(item.commitId, item));
-  return [...byCommit.values()].sort((left, right) => left.position - right.position);
 }

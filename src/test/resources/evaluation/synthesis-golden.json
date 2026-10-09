@@ -1,0 +1,23 @@
+{
+  "reportId": 9,
+  "taskId": 4,
+  "commitId": 101,
+  "commitHash": "abcdef1234567890abcdef1234567890abcdef1234",
+  "path": "src/main/java/PaymentService.java",
+  "source": "C101 [abcdef1234] 2026-07-20 · Исправление · риск: Высокий\nВ PaymentService удалена проверка amount > 0 перед списанием средств.\nРиски: отрицательная сумма может увеличить баланс вместо списания.\nПроверка: отправить сумму -1 и убедиться, что запрос отклонён, а баланс не изменился.",
+  "facts": {
+    "analysisTaskId": 4,
+    "repositoryUrl": "https://github.com/example/payments.git",
+    "repositoryName": "payments",
+    "branch": "main",
+    "firstCommitAt": "2026-07-20T10:00:00Z",
+    "lastCommitAt": "2026-07-20T10:00:00Z",
+    "periodDays": 1, "activeDays": 1,
+    "totalCommits": 1, "analyzedCommits": 1, "failedCommits": 0, "mergeCommits": 0,
+    "addedLines": 2, "deletedLines": 1, "touchedFiles": 1, "authorCount": 1,
+    "authors": [{"name":"Developer","commits":1,"addedLines":2,"deletedLines":1,"share":100}],
+    "activityGranularity":"DAY", "activity":[], "hotspots":[], "fileTypes":[], "largestCommits":[],
+    "risks":{"high":1,"medium":0,"low":0,"none":0,"unknown":0},
+    "categories":[], "insightCommits":1
+  }
+}

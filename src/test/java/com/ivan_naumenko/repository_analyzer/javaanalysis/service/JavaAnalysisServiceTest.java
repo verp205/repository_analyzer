@@ -23,6 +23,22 @@ class JavaAnalysisServiceTest {
         service = new JavaAnalysisService();
     }
 
+    @Test void reusesExactSourceAcrossRenamesAndStillReparsesChangedSource() {
+        String source = "package sample; public class Example { public int size() { return 1; } }";
+        var first = service.analyze("old/Example.java", source);
+        var renamed = service.analyze("new/Example.java", source);
+        assertEquals("new/Example.java", renamed.filePath());
+        org.junit.jupiter.api.Assertions.assertSame(first.types(), renamed.types());
+        assertEquals(first.problems(), renamed.problems());
+        var changed = service.analyze("new/Example.java", source.replace("size()", "length()"));
+        assertEquals("length", changed.types().getFirst().methods().getFirst().name());
+        assertEquals("size", first.types().getFirst().methods().getFirst().name());
+        var invalid = service.analyze("old/Broken.java", "class Broken {");
+        var invalidRename = service.analyze("new/Broken.java", "class Broken {");
+        assertEquals(invalid.problems(), invalidRename.problems());
+        assertFalse(invalidRename.parsingSuccessful());
+    }
+
     @Test
     void extractsPackageImportsClassMethodsAndNestedTypes() {
         String source = """

@@ -6,7 +6,9 @@ public record ReportGenerationData(
         ReportAudience audience,
         String repositoryUrl,
         String branch,
-        ReportPeriod period
+        ReportPeriod period,
+        int analysisRevision,
+        String headCommitHash
 ) {
 
     public ReportGenerationData {
@@ -20,7 +22,12 @@ public record ReportGenerationData(
             String repositoryUrl,
             String branch
     ) {
-        this(reportId, taskId, audience, repositoryUrl, branch, ReportPeriod.all());
+        this(reportId, taskId, audience, repositoryUrl, branch, ReportPeriod.all(), 0, null);
+    }
+
+    public ReportGenerationData(Integer reportId, Integer taskId, ReportAudience audience,
+                                String repositoryUrl, String branch, ReportPeriod period) {
+        this(reportId, taskId, audience, repositoryUrl, branch, period, 0, null);
     }
 
     /** Используется в JPQL-проекции. */
@@ -33,7 +40,9 @@ public record ReportGenerationData(
             ReportPeriodType periodType,
             Integer periodDays,
             String periodFrom,
-            String periodTo
+            String periodTo,
+            int analysisRevision,
+            String headCommitHash
     ) {
         this(
                 reportId,
@@ -41,7 +50,8 @@ public record ReportGenerationData(
                 audience,
                 repositoryUrl,
                 branch,
-                new ReportPeriod(periodType, periodDays, periodFrom, periodTo)
+                new ReportPeriod(periodType, periodDays, periodFrom, periodTo),
+                analysisRevision, headCommitHash
         );
     }
 }

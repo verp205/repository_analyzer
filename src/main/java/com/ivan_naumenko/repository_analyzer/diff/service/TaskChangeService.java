@@ -27,8 +27,18 @@ public class TaskChangeService {
 
     @Transactional(readOnly = true)
     public List<CommitChangeSummary> load(Integer taskId) {
+        return assemble(taskId, diffRepository.findStatsByTask(taskId), diffRepository.findChangedFilesByTask(taskId));
+    }
+
+    @Transactional(readOnly = true)
+    public List<CommitChangeSummary> loadForCommits(Integer taskId, List<Integer> ids) {
+        if (ids.isEmpty()) return List.of();
+        return assemble(taskId, diffRepository.findStatsByIds(ids), diffRepository.findChangedFilesByIds(ids));
+    }
+
+    private List<CommitChangeSummary> assemble(Integer taskId, List<CommitStatsRow> rows, List<ChangedFileRow> files) {
         Map<Integer, List<ChangedFileRow>> filesByCommit = new HashMap<>();
-        for (ChangedFileRow file : diffRepository.findChangedFilesByTask(taskId)) {
+        for (ChangedFileRow file : files) {
             filesByCommit.computeIfAbsent(
                     file.commitId(),
                     ignored -> new ArrayList<>()
@@ -40,7 +50,6 @@ public class TaskChangeService {
             parentCounts.put(row.commitId(), row.parentCount().intValue());
         }
 
-        List<CommitStatsRow> rows = diffRepository.findStatsByTask(taskId);
         List<CommitChangeSummary> result = new ArrayList<>(rows.size());
         for (int position = 0; position < rows.size(); position++) {
             CommitStatsRow row = rows.get(position);

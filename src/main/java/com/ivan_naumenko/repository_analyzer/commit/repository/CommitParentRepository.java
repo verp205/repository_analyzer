@@ -10,6 +10,7 @@ import java.util.List;
 
 public interface CommitParentRepository extends JpaRepository<CommitParent, Integer> {
 
+    @Query("SELECT p FROM CommitParent p WHERE p.childCommit.analysisTask.id = :analysisTaskId AND p.childCommit.reachable = true")
     List<CommitParent> findAllByChildCommit_AnalysisTask_Id(
             Integer analysisTaskId
     );

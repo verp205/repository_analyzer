@@ -4,7 +4,6 @@ import com.ivan_naumenko.repository_analyzer.commitinsight.dto.CommitInsightResp
 import com.ivan_naumenko.repository_analyzer.commitinsight.model.CommitInsightDetails;
 import com.ivan_naumenko.repository_analyzer.commitinsight.model.CommitInsightDraft;
 import com.ivan_naumenko.repository_analyzer.commitinsight.model.CommitInsightEntity;
-import com.ivan_naumenko.repository_analyzer.commitinsight.model.CommitInsightStatus;
 import com.ivan_naumenko.repository_analyzer.commitinsight.repository.CommitInsightRepository;
 import com.ivan_naumenko.repository_analyzer.diff.model.CommitChangeSummary;
 import com.ivan_naumenko.repository_analyzer.diff.service.TaskChangeService;
@@ -20,7 +19,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -33,10 +31,7 @@ public class CommitInsightService {
 
     @Transactional(readOnly = true)
     public Set<Integer> findReusableCommitIds(Integer taskId) {
-        return currentEntities(taskId).stream()
-                .filter(entity -> entity.getStatus() != CommitInsightStatus.FAILED)
-                .map(CommitInsightEntity::getCommitId)
-                .collect(Collectors.toSet());
+        return Set.copyOf(repository.findReusableIds(taskId, CommitInsightPromptFactory.PROMPT_VERSION));
     }
 
     @Transactional(readOnly = true)
@@ -44,6 +39,19 @@ public class CommitInsightService {
         Map<Integer, CommitInsightDraft> result = new HashMap<>();
         for (CommitInsightEntity entity : currentEntities(taskId)) {
             result.put(entity.getCommitId(), toDraft(entity));
+        }
+        return result;
+    }
+
+    @Transactional(readOnly = true)
+    public Map<Integer, CommitInsightDraft> findDrafts(Integer taskId, List<Integer> commitIds) {
+        Map<Integer, CommitInsightDraft> result = new HashMap<>();
+        List<Integer> ids = commitIds.stream().distinct().toList();
+        for (int offset = 0; offset < ids.size(); offset += 400) {
+            for (CommitInsightEntity entity : repository.findForCommits(taskId,
+                    ids.subList(offset, Math.min(offset + 400, ids.size())), CommitInsightPromptFactory.PROMPT_VERSION)) {
+                result.put(entity.getCommitId(), toDraft(entity));
+            }
         }
         return result;
     }
@@ -59,7 +67,7 @@ public class CommitInsightService {
             Integer taskId,
             List<CommitChangeSummary> commits
     ) {
-        Map<Integer, CommitInsightDraft> drafts = findDrafts(taskId);
+        Map<Integer, CommitInsightDraft> drafts = findDrafts(taskId, commits.stream().map(CommitChangeSummary::commitId).toList());
         return commits.stream()
                 .filter(commit -> drafts.containsKey(commit.commitId()))
                 .map(commit -> toResponse(commit, drafts.get(commit.commitId())))
@@ -67,6 +75,16 @@ public class CommitInsightService {
     }
 
     public void save(Integer commitId, CommitInsightDraft draft) {
+        saveAll(Map.of(commitId, draft));
+    }
+
+    public void saveAll(Map<Integer, CommitInsightDraft> drafts) {
+        List<CommitInsightEntity> entities = drafts.entrySet().stream()
+                .map(entry -> toEntity(entry.getKey(), entry.getValue())).toList();
+        if (!entities.isEmpty()) writeCoordinator.execute(() -> repository.saveAll(entities));
+    }
+
+    private CommitInsightEntity toEntity(Integer commitId, CommitInsightDraft draft) {
         Objects.requireNonNull(commitId, "commitId не должен быть null");
         Objects.requireNonNull(draft, "draft не должен быть null");
 
@@ -80,7 +98,7 @@ public class CommitInsightService {
         entity.setDetailsJson(mapper.writeValueAsString(draft.details()));
         entity.setCreatedAt(LocalDateTime.now());
 
-        writeCoordinator.execute(() -> repository.save(entity));
+        return entity;
     }
 
     public CommitInsightResponse toResponse(
