@@ -18,15 +18,24 @@ import java.util.List;
 public interface AnalysisReportRepository
         extends JpaRepository<AnalysisReport, Integer> {
 
-    Optional<AnalysisReport> findByAnalysisTask_IdAndAudienceAndPeriodKey(
+    Optional<AnalysisReport> findByAnalysisTask_IdAndAudienceAndPeriodKeyAndAnalysisRevision(
             Integer taskId,
             ReportAudience audience,
-            String periodKey
+            String periodKey,
+            int analysisRevision
     );
 
     List<AnalysisReport> findAllByAnalysisTask_IdOrderByCreatedAtAsc(
             Integer taskId
     );
+
+    @Query("""
+            SELECT r.id AS id, r.audience AS audience, r.status AS status, r.analysisRevision AS analysisRevision,
+                   r.headCommitHash AS headCommitHash, r.periodType AS periodType, r.periodDays AS periodDays,
+                   r.periodFrom AS periodFrom, r.periodTo AS periodTo, r.createdAt AS createdAt
+            FROM AnalysisReport r WHERE r.analysisTask.id = :taskId ORDER BY r.createdAt ASC, r.id ASC
+            """)
+    List<ReportSummaryView> findSummaries(@Param("taskId") Integer taskId);
 
     @Query("""
             SELECT report.id
@@ -48,7 +57,9 @@ public interface AnalysisReportRepository
                 report.periodType,
                 report.periodDays,
                 report.periodFrom,
-                report.periodTo
+                report.periodTo,
+                report.analysisRevision,
+                report.headCommitHash
             )
             FROM AnalysisReport report
             WHERE report.id = :reportId
@@ -69,7 +80,9 @@ public interface AnalysisReportRepository
                 report.periodType,
                 report.periodDays,
                 report.periodFrom,
-                report.periodTo
+                report.periodTo,
+                report.analysisRevision,
+                report.headCommitHash
             )
             FROM AnalysisReport report
             WHERE report.id = :reportId
@@ -103,6 +116,7 @@ public interface AnalysisReportRepository
                 report.totalCommits = 0,
                 report.processedCommits = 0,
                 report.content = null,
+                report.artifactsJson = null,
                 report.lastError = null,
                 report.updatedAt = :updatedAt
             WHERE report.id = :reportId
@@ -125,6 +139,7 @@ public interface AnalysisReportRepository
             SET report.totalCommits = :totalCommits,
                 report.processedCommits = 0,
                 report.content = null,
+                report.artifactsJson = null,
                 report.updatedAt = :updatedAt
             WHERE report.id = :reportId
               AND report.status = :status
@@ -160,6 +175,8 @@ public interface AnalysisReportRepository
             SET report.status = :completedStatus,
                 report.processedCommits = report.totalCommits,
                 report.content = :content,
+                report.artifactsJson = :artifactsJson,
+                report.factsJson = :factsJson,
                 report.lastError = null,
                 report.updatedAt = :updatedAt
             WHERE report.id = :reportId
@@ -170,6 +187,8 @@ public interface AnalysisReportRepository
             @Param("processingStatus") ReportStatus processingStatus,
             @Param("completedStatus") ReportStatus completedStatus,
             @Param("content") String content,
+            @Param("artifactsJson") String artifactsJson,
+            @Param("factsJson") String factsJson,
             @Param("updatedAt") LocalDateTime updatedAt
     );
 

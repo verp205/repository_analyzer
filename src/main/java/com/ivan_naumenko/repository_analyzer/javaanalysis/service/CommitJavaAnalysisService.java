@@ -44,6 +44,8 @@ public class CommitJavaAnalysisService {
         }
 
         List<ChangedJavaFileAnalysis> analyses = new ArrayList<>();
+        var sources = gitService.readFilesAtCommit(repositoryPath, commitHash,
+                diff.changedFiles().stream().filter(this::canAnalyze).map(ChangedFile::newPath).distinct().toList());
 
         for (int position = 0;
              position < diff.changedFiles().size();
@@ -54,11 +56,7 @@ public class CommitJavaAnalysisService {
                 continue;
             }
 
-            String sourceCode = gitService.readFileAtCommit(
-                    repositoryPath,
-                    commitHash,
-                    changedFile.newPath()
-            );
+            String sourceCode = sources.get(changedFile.newPath());
             JavaFileAnalysis analysis = javaAnalysisService.analyze(
                     changedFile.newPath(),
                     sourceCode

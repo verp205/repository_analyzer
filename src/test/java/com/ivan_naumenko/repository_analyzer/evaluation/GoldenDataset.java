@@ -15,9 +15,13 @@ public final class GoldenDataset {
     }
 
     public static List<GoldenCommitCase> load() {
-        try (InputStream input = GoldenDataset.class.getResourceAsStream(RESOURCE)) {
+        return load(RESOURCE);
+    }
+
+    public static List<GoldenCommitCase> load(String resource) {
+        try (InputStream input = GoldenDataset.class.getResourceAsStream(resource)) {
             if (input == null) {
-                throw new IllegalStateException("Не найден эталонный набор " + RESOURCE);
+                throw new IllegalStateException("Не найден эталонный набор " + resource);
             }
             return List.of(JsonMapper.builder().build().readValue(input, GoldenCommitCase[].class));
         } catch (IOException exception) {

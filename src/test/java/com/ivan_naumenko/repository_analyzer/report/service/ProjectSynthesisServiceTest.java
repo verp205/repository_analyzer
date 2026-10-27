@@ -21,9 +21,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Instant;
 import java.util.List;
 
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.lenient;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -43,7 +46,10 @@ class ProjectSynthesisServiceTest {
     private LlmRequestCoordinator requestCoordinator;
 
     @Mock
-    private RepositorySnapshotService snapshotService;
+    private AnalysisReportService reportService;
+
+    @Mock
+    private com.ivan_naumenko.repository_analyzer.report.artifact.ReportArtifactService artifactService;
 
     @Test
     void summarizesLargeHistoryInBatchesBeforeFinalSynthesis() {
@@ -66,7 +72,7 @@ class ProjectSynthesisServiceTest {
                 eq(ReportAudience.ANALYST),
                 eq(LlmRequestProfile.SYNTHESIS_BATCH)
         )).thenReturn("Краткая сводка группы.");
-        when(promptFactory.buildFinal(eq(report), any(), any(), anyList()))
+        when(promptFactory.buildFinal(eq(report), any(), any(), anyList(), any()))
                 .thenReturn("final-prompt");
         when(requestCoordinator.getOrGenerate(
                 "final-prompt",
@@ -82,7 +88,9 @@ class ProjectSynthesisServiceTest {
                 | Проект развивается | История |
                 """);
 
-        String synthesis = service().synthesize(report, null, insights);
+        when(artifactService.parse(any(), eq(report), any(), any())).thenReturn(
+                new com.ivan_naumenko.repository_analyzer.report.artifact.ReportArtifacts.SynthesisResult("## Главное", null));
+        String synthesis = service().synthesize(report, null, insights).content();
 
         verify(promptFactory, times(3)).buildIntermediate(
                 eq(report),
@@ -92,7 +100,7 @@ class ProjectSynthesisServiceTest {
                 anyList()
         );
         assertTrue(synthesis.startsWith("## Главное"));
-        assertTrue(synthesis.contains("- Проект развивается; История"));
+
         assertFalse(synthesis.contains("|---|"));
         assertFalse(synthesis.contains("рассуждения"));
         assertFalse(synthesis.contains("# Отчёт"));
@@ -112,7 +120,7 @@ class ProjectSynthesisServiceTest {
         );
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<String>> sources = ArgumentCaptor.forClass(List.class);
-        when(promptFactory.buildFinal(eq(report), any(), any(), sources.capture()))
+        when(promptFactory.buildFinal(eq(report), any(), any(), sources.capture(), any()))
                 .thenReturn("final-prompt");
         when(requestCoordinator.getOrGenerate(
                 "final-prompt",
@@ -124,10 +132,28 @@ class ProjectSynthesisServiceTest {
 
         assertEquals(1, sources.getValue().size());
         String source = sources.getValue().getFirst();
-        assertTrue(source.startsWith("[0000000] "));
+        assertTrue(source.startsWith("C10 [0000000] "));
         assertTrue(source.contains("Эффект: Пользователи могут оплатить заказ"));
         assertTrue(source.contains("Риски: Нет проверки суммы"));
         assertFalse(source.contains("Тесты:"));
+    }
+
+    @Test
+    void discardsInvalidCachedSynthesisSoRetryCanGenerateAgain() {
+        ReportGenerationData report = report(ReportAudience.DEVELOPER);
+        when(promptFactory.buildFinal(eq(report), any(), any(), anyList(), any())).thenReturn("final-prompt");
+        when(requestCoordinator.getOrGenerate(startsWith("final-prompt"), eq(report.audience()), eq(LlmRequestProfile.SYNTHESIS_FINAL)))
+                .thenReturn("invalid");
+        when(artifactService.parse(eq("invalid"), eq(report), any(), any())).thenThrow(new IllegalStateException("Bad JSON"));
+        assertThrows(IllegalStateException.class, () -> service().synthesize(report, null, List.of()));
+        verify(requestCoordinator).discardResponse("final-prompt", LlmRequestProfile.SYNTHESIS_FINAL, "invalid");
+        verify(requestCoordinator).discardResponse(startsWith("final-prompt\n"), eq(LlmRequestProfile.SYNTHESIS_FINAL), eq("invalid"));
+    }
+
+    private com.ivan_naumenko.repository_analyzer.report.grounding.GroundedReviewService passthroughReview() {
+        var review = mock(com.ivan_naumenko.repository_analyzer.report.grounding.GroundedReviewService.class);
+        lenient().when(review.refine(any(), any(), anyList(), anyList(), any())).thenAnswer(call -> call.getArgument(4));
+        return review;
     }
 
     private ProjectSynthesisService service() {
@@ -136,7 +162,7 @@ class ProjectSynthesisServiceTest {
                 requestCoordinator,
                 new ReportTextSanitizer(),
                 new ReportProperties(3, 4_000, 3, 5, 40),
-                snapshotService
+                reportService, artifactService, passthroughReview()
         );
     }
 

@@ -34,6 +34,7 @@ public class AnalysisReportController {
     private final ReportOrchestrator orchestrator;
     private final ReportEventService eventService;
     private final ReportScopeService scopeService;
+    private final com.ivan_naumenko.repository_analyzer.report.artifact.ReportEvidenceService evidenceService;
 
     @GetMapping("/analysis-tasks/{taskId}/reports")
     public List<AnalysisReportResponse> getForTask(
@@ -62,6 +63,11 @@ public class AnalysisReportController {
                 : ResponseEntity.ok(response);
     }
 
+    @GetMapping("/analysis-tasks/{taskId}/report-summaries")
+    public List<com.ivan_naumenko.repository_analyzer.report.dto.ReportSummaryResponse> summaries(@PathVariable Integer taskId) {
+        return reportService.getSummaries(taskId);
+    }
+
     @GetMapping("/reports/{reportId}")
     public AnalysisReportResponse get(@PathVariable Integer reportId) {
         return reportService.getResponse(reportId);
@@ -77,6 +83,18 @@ public class AnalysisReportController {
             @PathVariable Integer reportId
     ) {
         return scopeService.commitInsights(reportId);
+    }
+
+    @GetMapping("/reports/{reportId}/evidence/{evidenceId}")
+    public com.ivan_naumenko.repository_analyzer.report.artifact.ReportArtifacts.EvidenceDetail evidence(
+            @PathVariable Integer reportId, @PathVariable String evidenceId) {
+        return evidenceService.detail(reportId, evidenceId);
+    }
+
+    @GetMapping("/reports/{reportId}/evidence/{evidenceId}/files/{position}")
+    public com.ivan_naumenko.repository_analyzer.report.artifact.ReportArtifacts.EvidenceFile evidenceFile(
+            @PathVariable Integer reportId, @PathVariable String evidenceId, @PathVariable int position) {
+        return evidenceService.file(reportId, evidenceId, position);
     }
 
     @PostMapping("/reports/{reportId}/retry")

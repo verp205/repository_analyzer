@@ -114,7 +114,10 @@ class AnalysisReportServiceTest {
                 taskService,
                 new SqliteWriteCoordinator(),
                 changeService,
-                periodResolver
+                periodResolver,
+                org.mockito.Mockito.mock(com.ivan_naumenko.repository_analyzer.report.snapshot.RepositorySnapshotService.class),
+                org.mockito.Mockito.mock(com.ivan_naumenko.repository_analyzer.report.facts.service.RepositoryFactsService.class),
+                new tools.jackson.databind.ObjectMapper()
         );
     }
 }

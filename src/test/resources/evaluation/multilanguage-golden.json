@@ -1,0 +1,317 @@
+[
+  {
+    "id": "python-negative-payment",
+    "description": "Allow payment amounts",
+    "expected": {
+      "categories": [
+        "FEATURE",
+        "FIX",
+        "REFACTOR"
+      ],
+      "riskLevels": [
+        "HIGH",
+        "MEDIUM"
+      ]
+    },
+    "commit": {
+      "message": "Allow payment amounts",
+      "files": [
+        {
+          "path": "app/payments.py",
+          "changeType": "MODIFY",
+          "addedLines": 2,
+          "deletedLines": 2,
+          "patch": "@@ -1,6 +1,6 @@\n-    if amount <= 0:\n-        raise ValueError(\"positive amount required\")\n+    if amount == 0:\n+        raise ValueError(\"nonzero amount required\")\n     account.debit(amount)\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "typescript-auth-bypass",
+    "description": "Simplify authentication",
+    "expected": {
+      "categories": [
+        "SECURITY",
+        "REFACTOR"
+      ],
+      "riskLevels": [
+        "HIGH"
+      ]
+    },
+    "commit": {
+      "message": "Simplify authentication",
+      "files": [
+        {
+          "path": "src/auth.ts",
+          "changeType": "MODIFY",
+          "addedLines": 1,
+          "deletedLines": 1,
+          "patch": "@@ -1,6 +1,6 @@\n-    if (!session?.user) return res.status(401).end();\n+    // allow requests without a session\n     return next();\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "go-parameterized-query",
+    "description": "Use bound SQL parameters",
+    "expected": {
+      "categories": [
+        "SECURITY",
+        "FIX",
+        "DATA"
+      ],
+      "riskLevels": [
+        "LOW",
+        "MEDIUM"
+      ]
+    },
+    "commit": {
+      "message": "Use bound SQL parameters",
+      "files": [
+        {
+          "path": "internal/search.go",
+          "changeType": "MODIFY",
+          "addedLines": 1,
+          "deletedLines": 1,
+          "patch": "@@ -1,6 +1,6 @@\n-rows, err := db.Query(\"SELECT * FROM users WHERE name = '\" + name + \"'\")\n+rows, err := db.Query(\"SELECT * FROM users WHERE name = $1\", name)\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "rust-unchecked-index",
+    "description": "Remove bounds check",
+    "expected": {
+      "categories": [
+        "REFACTOR",
+        "FEATURE",
+        "FIX"
+      ],
+      "riskLevels": [
+        "HIGH",
+        "MEDIUM"
+      ]
+    },
+    "commit": {
+      "message": "Remove bounds check",
+      "files": [
+        {
+          "path": "src/catalog.rs",
+          "changeType": "MODIFY",
+          "addedLines": 1,
+          "deletedLines": 1,
+          "patch": "@@ -1,6 +1,6 @@\n-    items.get(index).cloned()\n+    Some(items[index].clone())\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "c-buffer-overflow",
+    "description": "Copy incoming payload",
+    "expected": {
+      "categories": [
+        "SECURITY",
+        "REFACTOR",
+        "FIX"
+      ],
+      "riskLevels": [
+        "HIGH"
+      ]
+    },
+    "commit": {
+      "message": "Copy incoming payload",
+      "files": [
+        {
+          "path": "src/parser.c",
+          "changeType": "MODIFY",
+          "addedLines": 1,
+          "deletedLines": 2,
+          "patch": "@@ -1,6 +1,6 @@\n-    if (len > sizeof(buf)) return ERROR;\n-    memcpy(buf, input, len);\n+    memcpy(buf, input, len);\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "csharp-admin-access",
+    "description": "Simplify administrator endpoint",
+    "expected": {
+      "categories": [
+        "SECURITY",
+        "API",
+        "REFACTOR"
+      ],
+      "riskLevels": [
+        "HIGH"
+      ]
+    },
+    "commit": {
+      "message": "Simplify administrator endpoint",
+      "files": [
+        {
+          "path": "Controllers/AdminController.cs",
+          "changeType": "MODIFY",
+          "addedLines": 1,
+          "deletedLines": 1,
+          "patch": "@@ -1,6 +1,6 @@\n-[Authorize(Roles = \"Admin\")]\n+[AllowAnonymous]\n public void DeleteUser(int id) { service.Delete(id); }\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "php-html-escape",
+    "description": "Escape displayed name",
+    "expected": {
+      "categories": [
+        "SECURITY",
+        "FIX"
+      ],
+      "riskLevels": [
+        "LOW",
+        "MEDIUM"
+      ]
+    },
+    "commit": {
+      "message": "Escape displayed name",
+      "files": [
+        {
+          "path": "views/profile.php",
+          "changeType": "MODIFY",
+          "addedLines": 1,
+          "deletedLines": 1,
+          "patch": "@@ -1,6 +1,6 @@\n-echo $user[\"name\"];\n+echo htmlspecialchars($user[\"name\"], ENT_QUOTES, \"UTF-8\");\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "ruby-token-logging",
+    "description": "Debug session requests",
+    "expected": {
+      "categories": [
+        "SECURITY",
+        "CHORE"
+      ],
+      "riskLevels": [
+        "HIGH",
+        "MEDIUM"
+      ]
+    },
+    "commit": {
+      "message": "Debug session requests",
+      "files": [
+        {
+          "path": "app/session.rb",
+          "changeType": "MODIFY",
+          "addedLines": 1,
+          "deletedLines": 0,
+          "patch": "@@ -1,6 +1,6 @@\n+logger.info(\"session token: #{session[:token]}\")\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "kotlin-access-check",
+    "description": "Remove access filter",
+    "expected": {
+      "categories": [
+        "SECURITY",
+        "REFACTOR",
+        "FEATURE"
+      ],
+      "riskLevels": [
+        "HIGH"
+      ]
+    },
+    "commit": {
+      "message": "Remove access filter",
+      "files": [
+        {
+          "path": "src/Access.kt",
+          "changeType": "MODIFY",
+          "addedLines": 0,
+          "deletedLines": 1,
+          "patch": "@@ -1,6 +1,6 @@\n-    require(user.isAdmin) { \"Admin required\" }\n     deleteAccount(id)\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "shell-quoted-path",
+    "description": "Quote cleanup path",
+    "expected": {
+      "categories": [
+        "FIX",
+        "SECURITY"
+      ],
+      "riskLevels": [
+        "LOW",
+        "MEDIUM"
+      ]
+    },
+    "commit": {
+      "message": "Quote cleanup path",
+      "files": [
+        {
+          "path": "scripts/cleanup.sh",
+          "changeType": "MODIFY",
+          "addedLines": 1,
+          "deletedLines": 1,
+          "patch": "@@ -1,6 +1,6 @@\n-rm -rf $cache_dir\n+rm -rf -- \"$cache_dir\"\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "extensionless-python",
+    "description": "Accept negative charge amounts",
+    "expected": {
+      "categories": [
+        "FEATURE",
+        "FIX",
+        "REFACTOR"
+      ],
+      "riskLevels": [
+        "HIGH",
+        "MEDIUM"
+      ]
+    },
+    "commit": {
+      "message": "Accept negative charge amounts",
+      "files": [
+        {
+          "path": "bin/charge",
+          "changeType": "MODIFY",
+          "addedLines": 1,
+          "deletedLines": 1,
+          "patch": "@@ -1,6 +1,6 @@\n #!/usr/bin/env python3\n-assert amount > 0\n+assert amount != 0\n debit(amount)\n"
+        }
+      ]
+    }
+  },
+  {
+    "id": "unknown-language",
+    "description": "Remove refund authorization",
+    "expected": {
+      "categories": [
+        "SECURITY",
+        "FEATURE",
+        "REFACTOR"
+      ],
+      "riskLevels": [
+        "HIGH"
+      ]
+    },
+    "commit": {
+      "message": "Remove refund authorization",
+      "files": [
+        {
+          "path": "rules/payment.custom",
+          "changeType": "MODIFY",
+          "addedLines": 1,
+          "deletedLines": 1,
+          "patch": "@@ -1,6 +1,6 @@\n-rule refund(user, payment) requires user.is_admin\n+rule refund(user, payment) allows any_user\n"
+        }
+      ]
+    }
+  }
+]

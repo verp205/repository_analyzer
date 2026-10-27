@@ -68,21 +68,18 @@ export function linkCommitReferences(
 ) {
   if (!markdown || commits.length === 0) return markdown;
 
-  const byPrefix = new Map<string, string>();
-  for (const commit of commits) {
-    const hash = commit.commitHash.toLowerCase();
-    byPrefix.set(hash.slice(0, 7), hash);
-  }
-
-  return markdown.replace(COMMIT_REFERENCE, (match, hash: string) => {
-    const reference = hash.toLowerCase();
-    const fullHash = byPrefix.get(reference.slice(0, 7));
-    if (!fullHash || !fullHash.startsWith(reference)) return match;
-
-    const short = fullHash.slice(0, 7);
-    const url = commitUrl(repositoryUrl, fullHash);
-    return url ? `[\`${short}\`](${url})` : `\`${short}\``;
-  });
+  const hashes = commits.map(commit => commit.commitHash.toLowerCase());
+  // Existing links and fenced code are already structured; do not rewrite their destinations.
+  return markdown.split(/(```[\s\S]*?```|!?\[[^\]]*\]\([^)]*\))/g).map(part => {
+    if (part.startsWith("```") || /^!?\[[^\]]*\]\(/.test(part)) return part;
+    return part.replace(COMMIT_REFERENCE, (match, hash: string) => {
+      const matches = hashes.filter(full => full.startsWith(hash.toLowerCase()));
+      if (matches.length !== 1) return match;
+      const fullHash = matches[0];
+      const url = commitUrl(repositoryUrl, fullHash);
+      return url ? `[\`${fullHash.slice(0, 7)}\`](${url})` : `\`${fullHash.slice(0, 7)}\``;
+    });
+  }).join("");
 }
 
 function extractItems(body: string) {

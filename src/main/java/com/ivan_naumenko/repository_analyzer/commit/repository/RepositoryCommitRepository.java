@@ -18,7 +18,11 @@ import java.util.Optional;
 
 public interface RepositoryCommitRepository extends JpaRepository<RepositoryCommit, Integer> {
 
-    List<RepositoryCommit> findAllByAnalysisTask_Id(Integer analysisTaskId);
+    @Query("SELECT c FROM RepositoryCommit c WHERE c.analysisTask.id = :taskId AND c.reachable = true")
+    List<RepositoryCommit> findAllByAnalysisTask_Id(@Param("taskId") Integer analysisTaskId);
+
+    @Query("SELECT c FROM RepositoryCommit c WHERE c.analysisTask.id = :taskId")
+    List<RepositoryCommit> findStoredByTask(@Param("taskId") Integer analysisTaskId);
 
     @Query("""
             SELECT new com.ivan_naumenko.repository_analyzer.commit.model.CommitStatusCount(
@@ -27,6 +31,7 @@ public interface RepositoryCommitRepository extends JpaRepository<RepositoryComm
             )
             FROM RepositoryCommit commit
             WHERE commit.analysisTask.id = :taskId
+              AND commit.reachable = true
             GROUP BY commit.processingStatus
             """)
     List<CommitStatusCount> countByStatus(
@@ -37,6 +42,7 @@ public interface RepositoryCommitRepository extends JpaRepository<RepositoryComm
             SELECT commit.id
             FROM RepositoryCommit commit
             WHERE commit.analysisTask.id = :taskId
+              AND commit.reachable = true
               AND commit.processingStatus = :status
             ORDER BY commit.committedAt ASC, commit.id ASC
             """)
@@ -45,11 +51,13 @@ public interface RepositoryCommitRepository extends JpaRepository<RepositoryComm
             @Param("status") CommitProcessingStatus status
     );
 
+    @Query("SELECT COUNT(c) FROM RepositoryCommit c WHERE c.analysisTask.id = :analysisTaskId AND c.reachable = true AND c.processingStatus IN :statuses")
     long countByAnalysisTask_IdAndProcessingStatusIn(
             Integer analysisTaskId,
             Collection<CommitProcessingStatus> statuses
     );
 
+    @Query("SELECT COUNT(c) > 0 FROM RepositoryCommit c WHERE c.analysisTask.id = :analysisTaskId AND c.reachable = true AND c.processingStatus = :status")
     boolean existsByAnalysisTask_IdAndProcessingStatus(
             Integer analysisTaskId,
             CommitProcessingStatus status
@@ -82,6 +90,7 @@ public interface RepositoryCommitRepository extends JpaRepository<RepositoryComm
                   ON task.id = commit_row.analysis_task_id
                 WHERE commit_row.analysis_task_id = :taskId
                   AND commit_row.processing_status = 'NEW'
+                  AND commit_row.reachable = 1
                   AND task.status = 'PROCESSING'
                 ORDER BY RANDOM()
                 LIMIT 1

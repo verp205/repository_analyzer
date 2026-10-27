@@ -2,6 +2,7 @@ package com.ivan_naumenko.repository_analyzer.llm.context.model;
 
 import com.ivan_naumenko.repository_analyzer.diff.model.FileChangeType;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.Objects;
 
 public record CompactFileContext(
@@ -11,8 +12,14 @@ public record CompactFileContext(
         int deletedLines,
         String patch,
         boolean patchTruncated,
-        CompactJavaFileContext javaAnalysis
+        CompactJavaFileContext javaAnalysis,
+        @JsonInclude(JsonInclude.Include.NON_NULL) String language
 ) {
+
+    public CompactFileContext(String path, FileChangeType changeType, int addedLines, int deletedLines,
+                              String patch, boolean patchTruncated, CompactJavaFileContext javaAnalysis) {
+        this(path, changeType, addedLines, deletedLines, patch, patchTruncated, javaAnalysis, null);
+    }
 
     public CompactFileContext {
         if (path == null || path.isBlank()) {

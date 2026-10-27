@@ -1,6 +1,7 @@
 package com.ivan_naumenko.repository_analyzer.llm.context.service;
 
 import com.ivan_naumenko.repository_analyzer.commit.model.CommitProcessingData;
+import com.ivan_naumenko.repository_analyzer.code.TextCodeLanguages;
 import com.ivan_naumenko.repository_analyzer.diff.model.ChangedFile;
 import com.ivan_naumenko.repository_analyzer.diff.model.CommitDiff;
 import com.ivan_naumenko.repository_analyzer.diff.model.FileChangeType;
@@ -179,7 +180,8 @@ public class CompactContextService {
                 changedFile.deletedLines(),
                 patch.value(),
                 patch.truncated(),
-                compactJavaAnalysis
+                compactJavaAnalysis,
+                TextCodeLanguages.extraContextLanguage(changedFile.path(), changedFile.patch())
         );
     }
 

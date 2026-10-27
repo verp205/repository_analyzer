@@ -81,6 +81,19 @@ public class AnalysisTaskService {
                 .orElseThrow(() -> new AnalysisTaskNotFoundException("Задача не найдена"));
     }
 
+    public void recordDiscovery(Integer taskId, String headHash, int addedCommits) {
+        writeCoordinator.execute(() -> {
+            AnalysisTask task = getById(taskId);
+            if (!Objects.equals(task.getHeadCommitHash(), headHash)) {
+                task.setRevision(task.getRevision() + 1);
+                task.setHeadCommitHash(headHash);
+            }
+            task.setAddedCommits(addedCommits);
+            task.setUpdatedAt(LocalDateTime.now());
+            repository.saveAndFlush(task);
+        });
+    }
+
     public List<AnalysisTask> getAll() {
         return repository.findAllByOrderByUpdatedAtDesc();
     }

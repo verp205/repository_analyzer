@@ -58,6 +58,9 @@ class AnalysisTaskControllerTest {
     @Mock
     private RepositoryUrlPolicy repositoryUrlPolicy;
 
+    @Mock
+    private com.ivan_naumenko.repository_analyzer.analysis.service.AnalysisRefreshService refreshService;
+
     private MockMvc mockMvc;
 
     @BeforeEach
@@ -70,7 +73,7 @@ class AnalysisTaskControllerTest {
                 analysisRecoveryService,
                 new TaskMapper(),
                 orchestrator,
-                repositoryUrlPolicy
+                repositoryUrlPolicy, refreshService
         );
 
         mockMvc = MockMvcBuilders.standaloneSetup(controller)

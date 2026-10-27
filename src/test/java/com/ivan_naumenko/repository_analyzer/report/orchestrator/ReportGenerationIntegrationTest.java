@@ -175,6 +175,8 @@ class ReportGenerationIntegrationTest {
         assertEquals(1, facts.risks().low());
 
         assertEquals(2, cacheRepository.count());
+        assertEquals(1, response.artifacts().coverage().unreviewedCommits());
+        assertEquals("SOURCE_LINKED", response.artifacts().quality().status());
     }
 
     @Test
@@ -207,7 +209,7 @@ class ReportGenerationIntegrationTest {
         assertEquals(ReportAudience.DEVELOPER, developerResponse.audience());
         assertEquals(ReportAudience.SECURITY, securityResponse.audience());
         assertEquals(1, insightRepository.count());
-        // Один общий анализ коммита и по одному ролевому синтезу.
+        // Один общий разбор коммита и по одному ролевому синтезу; привязка цитат не вызывает LLM.
         assertEquals(3, cacheRepository.count());
     }
 

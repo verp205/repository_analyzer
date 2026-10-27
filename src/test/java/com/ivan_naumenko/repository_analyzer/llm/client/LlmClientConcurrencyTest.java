@@ -79,7 +79,7 @@ class LlmClientConcurrencyTest {
                 "response",
                 client.generate("prompt", LlmRequestProfile.SYNTHESIS_FINAL)
         );
-        assertEquals(new LlmRequestOptions(1_800, "low", false, 600_000), captured.get());
+        assertEquals(new LlmRequestOptions(1_800, "low", true, 600_000), captured.get());
 
         client.generate("prompt", LlmRequestProfile.COMMIT_ANALYSIS);
         assertEquals(new LlmRequestOptions(700, "none", true, 180_000), captured.get());
@@ -90,7 +90,7 @@ class LlmClientConcurrencyTest {
         assertTrue(client.cacheNamespace(LlmRequestProfile.COMMIT_ANALYSIS)
                 .endsWith("maxTokens=700;reasoning=none;json"));
         assertTrue(client.cacheNamespace(LlmRequestProfile.SYNTHESIS_FINAL)
-                .endsWith("maxTokens=1800;reasoning=low"));
+                .endsWith("maxTokens=1800;reasoning=low;json"));
     }
 
     @Test

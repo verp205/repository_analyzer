@@ -1,3 +1,6 @@
+import { citationMarkdown } from "@/lib/reportGrounding";
+import { describeEvidence } from "@/lib/reportEvidence";
+import { buildActionPlanMarkdown } from "@/lib/actionPlan";
 import { riskLabel } from "@/lib/labels";
 import { linkCommitReferences, type ReportSection } from "@/lib/reportContent";
 import {
@@ -6,7 +9,7 @@ import {
   reportLayout,
   type KeyNumberId,
 } from "@/lib/reportLayout";
-import type { CommitInsight, ReportAudience, RepositoryFacts } from "@/lib/types";
+import type { CommitInsight, ReportAudience, RepositoryFacts, ReportArtifacts } from "@/lib/types";
 import { commitUrl, formatDate, formatNumber } from "@/lib/utils";
 
 export interface MarkdownReportData {
@@ -18,6 +21,7 @@ export interface MarkdownReportData {
   facts: RepositoryFacts | null;
   commits: CommitInsight[];
   repositoryUrl: string;
+  artifacts?: ReportArtifacts | null;
 }
 
 const ATTENTION_LIMIT = 15;
@@ -92,7 +96,7 @@ export function buildReportMarkdown(data: MarkdownReportData) {
     }
   }
 
-  const attention = layout.attentionCommits ? attentionCommits(data.commits) : [];
+  const attention = layout.attentionCommits && (!data.artifacts?.coverage || data.artifacts.coverage.mode === "SOURCES_ONLY") ? attentionCommits(data.commits) : [];
   if (attention.length > 0) {
     lines.push("## Коммиты, требующие внимания", "");
     for (const commit of attention.slice(0, ATTENTION_LIMIT)) {
@@ -116,7 +120,20 @@ export function buildReportMarkdown(data: MarkdownReportData) {
     lines.push("");
   }
 
-  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trim()}\n`;
+  if (data.artifacts) {
+    lines.push(buildActionPlanMarkdown(data.artifacts.actions, data.artifacts.evidence, data.repositoryUrl), "", "## Источники", "");
+    for (const source of data.artifacts.evidence) {
+      const url = source.kind === "COMMIT" && source.commitHash ? commitUrl(data.repositoryUrl, source.commitHash) : null;
+      lines.push(`<a id="evidence-${source.id}"></a>`, "", `### ${source.id} — ${source.label}`, "",
+        source.commitHash ? `Версия: ${url ? `[${source.commitHash}](${url})` : source.commitHash}` : "",
+        source.paths.length ? `Файлы: ${source.paths.map(path => `\`${path}\``).join(", ")}` : "", "");
+      if (source.kind !== "COMMIT") lines.push(...describeEvidence(source).map(([label, value]) => `- **${label}:** ${value}`), "");
+    }
+    lines.push(citationMarkdown(data.artifacts));
+    lines.push("## Проверка источников", "", ...data.artifacts.quality.checks.map(check => `- ${check}`), "", ...(data.artifacts.coverage ? [] : data.artifacts.quality.warnings), "");
+  }
+  // Preserve whitespace inside literal code excerpts, including consecutive blank lines.
+  return `${lines.join("\n").trim()}\n`;
 }
 
 function cell(value: string) {

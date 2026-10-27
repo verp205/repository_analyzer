@@ -18,6 +18,16 @@ public record AnalysisReportResponse(
         String content,
         String lastError,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        int analysisRevision,
+        String headCommitHash,
+        com.ivan_naumenko.repository_analyzer.report.artifact.ReportArtifacts artifacts
 ) {
+    public AnalysisReportResponse(Integer id, Integer analysisTaskId, String repositoryUrl, String branch,
+                                  ReportPeriodResponse period, ReportAudience audience, ReportStatus status,
+                                  int totalCommits, int processedCommits, String content, String lastError,
+                                  LocalDateTime createdAt, LocalDateTime updatedAt) {
+        this(id, analysisTaskId, repositoryUrl, branch, period, audience, status, totalCommits,
+                processedCommits, content, lastError, createdAt, updatedAt, 0, null, null);
+    }
 }

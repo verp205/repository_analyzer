@@ -40,6 +40,7 @@ interface ReportMarkdownProps {
   commits: CommitInsight[];
   repositoryUrl: string;
   className?: string;
+  onEvidence?: (id: string) => void;
 }
 
 export const ReportMarkdown = memo(function ReportMarkdown({
@@ -47,6 +48,7 @@ export const ReportMarkdown = memo(function ReportMarkdown({
   commits,
   repositoryUrl,
   className,
+  onEvidence,
 }: ReportMarkdownProps) {
   const linked = useMemo(
     () => linkCommitReferences(markdown, commits, repositoryUrl),
@@ -55,7 +57,13 @@ export const ReportMarkdown = memo(function ReportMarkdown({
 
   return (
     <div className={cn("report-markdown", className)}>
-      <ReactMarkdown components={components}>{linked}</ReactMarkdown>
+      <ReactMarkdown components={{ ...components, a: ({ children, href }) => {
+        if (href?.startsWith("#evidence-") && onEvidence) {
+          return <a href="#report-evidence" onClick={event => { event.preventDefault(); onEvidence(href.slice("#evidence-".length)); }}
+            className="rounded bg-accent-soft px-1 py-0.5 font-mono text-xs" aria-label={`Открыть источник ${href.slice("#evidence-".length)}`}>{children}</a>;
+        }
+        return <a href={href} rel="noreferrer" target={href?.startsWith("#") ? undefined : "_blank"}>{children}</a>;
+      } }}>{linked}</ReactMarkdown>
     </div>
   );
 });

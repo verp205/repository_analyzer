@@ -97,7 +97,7 @@ public class CommitInsightPromptFactory {
                 PROMPT_VERSION,
                 RULES,
                 SCHEMA,
-                serializer.serialize(context),
+                serializer.serializeForAnalysis(context),
                 pullRequest == null
                         ? ""
                         : "\n<PULL_REQUEST>\n" + describe(pullRequest) + "\n</PULL_REQUEST>\n"
@@ -122,7 +122,7 @@ public class CommitInsightPromptFactory {
         }
 
         String serialized = contexts.stream()
-                .map(serializer::serialize)
+                .map(serializer::serializeForAnalysis)
                 .collect(Collectors.joining(",\n", "[\n", "\n]"));
 
         List<String> pullRequestBlocks = new ArrayList<>();

@@ -55,6 +55,9 @@ public class RepositoryCommit {
     @Column(name = "attempt_count", nullable = false)
     private Integer attemptCount;
 
+    @Column(name = "reachable", nullable = false)
+    private boolean reachable = true;
+
     @Column(name = "last_error")
     private String lastError;
 

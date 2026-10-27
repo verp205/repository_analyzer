@@ -46,3 +46,7 @@ data/repositories/
 frontend/node_modules/
 frontend/dist/
 frontend/.env.local
+
+### Browser verification artifacts ###
+.playwright-cli/
+output/playwright/

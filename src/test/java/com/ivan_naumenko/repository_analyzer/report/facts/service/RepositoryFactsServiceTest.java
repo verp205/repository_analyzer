@@ -45,7 +45,7 @@ class RepositoryFactsServiceTest {
         task.setRepositoryUrl("https://github.com/acme/smartstock.git");
         task.setBranch("main");
         when(taskService.getById(1)).thenReturn(task);
-        when(insightService.findDrafts(1)).thenReturn(Map.of());
+        when(insightService.findDrafts(org.mockito.ArgumentMatchers.eq(1), org.mockito.ArgumentMatchers.anyList())).thenReturn(Map.of());
 
         RepositoryFactsResponse facts = service.build(1, List.of(
                 commit(1, "verp205", "ivan@example.com"),

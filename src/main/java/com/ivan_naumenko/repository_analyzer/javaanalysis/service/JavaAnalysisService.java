@@ -22,19 +22,29 @@ import com.ivan_naumenko.repository_analyzer.javaanalysis.model.JavaFileAnalysis
 import com.ivan_naumenko.repository_analyzer.javaanalysis.model.JavaMethodAnalysis;
 import com.ivan_naumenko.repository_analyzer.javaanalysis.model.JavaTypeAnalysis;
 import com.ivan_naumenko.repository_analyzer.javaanalysis.model.JavaTypeKind;
+import com.ivan_naumenko.repository_analyzer.cache.BoundedSingleFlightCache;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 
 @Service
 public class JavaAnalysisService {
+    private static final int MAX_CACHED_SOURCE_CHARS = 256 * 1024;
+    private final BoundedSingleFlightCache<String, JavaFileAnalysis> analyses = new BoundedSingleFlightCache<>(64);
 
     public JavaFileAnalysis analyze(
             String filePath,
             String sourceCode
     ) {
         validateArguments(filePath, sourceCode);
+        if (sourceCode.length() > MAX_CACHED_SOURCE_CHARS) return parse(filePath, sourceCode);
+        // Exact source text is the key: no hash collisions, no sharing mutable parser/AST instances.
+        JavaFileAnalysis parsed = analyses.get(sourceCode, () -> parse("(source)", sourceCode));
+        return new JavaFileAnalysis(filePath, parsed.packageName(), parsed.imports(), parsed.types(), parsed.lineCount(),
+                parsed.parsingSuccessful(), parsed.problems());
+    }
 
+    private JavaFileAnalysis parse(String filePath, String sourceCode) {
         JavaParser javaParser = new JavaParser(
                 new ParserConfiguration().setLanguageLevel(
                         ParserConfiguration.LanguageLevel.BLEEDING_EDGE

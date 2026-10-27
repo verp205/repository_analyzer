@@ -102,7 +102,7 @@ class ReportOrchestratorConcurrencyTest {
 
         when(reportService.claim(reportId)).thenReturn(true);
         when(reportService.getGenerationData(reportId)).thenReturn(generationData);
-        when(changeService.load(taskId)).thenReturn(commits);
+        when(reportService.loadCommits(reportId)).thenReturn(commits);
         when(insightService.findReusableCommitIds(taskId)).thenReturn(Set.of());
         when(insightService.toResponse(any(), any())).thenReturn(insightResponse());
 
@@ -130,16 +130,16 @@ class ReportOrchestratorConcurrencyTest {
         }).when(reportService).updateProgress(eq(reportId), anyInt());
         when(insightService.findForCommits(eq(taskId), anyList())).thenReturn(List.of());
         when(synthesisService.synthesize(eq(generationData), any(), anyList()))
-                .thenReturn("## Главное\n\n- Итог.");
+                .thenReturn(new com.ivan_naumenko.repository_analyzer.report.artifact.ReportArtifacts.SynthesisResult("## Главное\n\n- Итог.", null));
 
         CountDownLatch completed = new CountDownLatch(1);
         AtomicReference<String> finalContent = new AtomicReference<>();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         doAnswer(invocation -> {
-            finalContent.set(invocation.getArgument(1));
+            finalContent.set(((com.ivan_naumenko.repository_analyzer.report.artifact.ReportArtifacts.SynthesisResult) invocation.getArgument(1)).content());
             completed.countDown();
             return null;
-        }).when(reportService).complete(eq(reportId), any(String.class));
+        }).when(reportService).complete(eq(reportId), any(com.ivan_naumenko.repository_analyzer.report.artifact.ReportArtifacts.SynthesisResult.class), any());
         lenient().doAnswer(invocation -> {
             failure.set(invocation.getArgument(1));
             completed.countDown();
@@ -155,7 +155,7 @@ class ReportOrchestratorConcurrencyTest {
         assertEquals(3, maximumActive.get());
         assertEquals(List.of(1, 2, 3, 4, 5, 6), progressUpdates);
         assertEquals("## Главное\n\n- Итог.", finalContent.get());
-        verify(insightService, times(6)).save(anyInt(), any(CommitInsightDraft.class));
+        verify(insightService, times(6)).saveAll(org.mockito.ArgumentMatchers.anyMap());
         verify(synthesisService, times(1)).synthesize(eq(generationData), any(), anyList());
     }
 
@@ -168,17 +168,17 @@ class ReportOrchestratorConcurrencyTest {
 
         when(reportService.claim(reportId)).thenReturn(true);
         when(reportService.getGenerationData(reportId)).thenReturn(generationData);
-        when(changeService.load(taskId)).thenReturn(commits);
+        when(reportService.loadCommits(reportId)).thenReturn(commits);
         when(insightService.findReusableCommitIds(taskId)).thenReturn(Set.of(10, 20, 30));
         when(insightService.findForCommits(eq(taskId), anyList())).thenReturn(List.of());
         when(synthesisService.synthesize(eq(generationData), any(), anyList()))
-                .thenReturn("## Главное");
+                .thenReturn(new com.ivan_naumenko.repository_analyzer.report.artifact.ReportArtifacts.SynthesisResult("## Главное", null));
 
         CountDownLatch completed = new CountDownLatch(1);
         doAnswer(invocation -> {
             completed.countDown();
             return null;
-        }).when(reportService).complete(eq(reportId), anyString());
+        }).when(reportService).complete(eq(reportId), any(com.ivan_naumenko.repository_analyzer.report.artifact.ReportArtifacts.SynthesisResult.class), any());
 
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
             assertTrue(orchestrator(executor, 2).start(reportId));
@@ -203,17 +203,17 @@ class ReportOrchestratorConcurrencyTest {
 
         when(reportService.claim(reportId)).thenReturn(true);
         when(reportService.getGenerationData(reportId)).thenReturn(generationData);
-        when(changeService.load(taskId)).thenReturn(commits);
+        when(reportService.loadCommits(reportId)).thenReturn(List.of(commits.get(3), commits.get(4)));
         when(insightService.findReusableCommitIds(taskId)).thenReturn(Set.of(10, 20, 30, 40, 50));
         when(insightService.findForCommits(eq(taskId), anyList())).thenReturn(List.of());
         when(synthesisService.synthesize(eq(generationData), any(), anyList()))
-                .thenReturn("## Главное");
+                .thenReturn(new com.ivan_naumenko.repository_analyzer.report.artifact.ReportArtifacts.SynthesisResult("## Главное", null));
 
         CountDownLatch completed = new CountDownLatch(1);
         doAnswer(invocation -> {
             completed.countDown();
             return null;
-        }).when(reportService).complete(eq(reportId), anyString());
+        }).when(reportService).complete(eq(reportId), any(com.ivan_naumenko.repository_analyzer.report.artifact.ReportArtifacts.SynthesisResult.class), any());
 
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
             assertTrue(orchestrator(executor, 2).start(reportId));
@@ -233,7 +233,7 @@ class ReportOrchestratorConcurrencyTest {
 
         when(reportService.claim(reportId)).thenReturn(true);
         when(reportService.getGenerationData(reportId)).thenReturn(generationData);
-        when(changeService.load(taskId)).thenReturn(commits);
+        when(reportService.loadCommits(reportId)).thenReturn(commits);
         when(insightService.findReusableCommitIds(taskId)).thenReturn(Set.of());
 
         CountDownLatch requestsStarted = new CountDownLatch(2);
@@ -285,10 +285,10 @@ class ReportOrchestratorConcurrencyTest {
 
         assertEquals(2, requestCount.get());
         assertEquals(2, interrupted.get());
-        verify(reportService, never()).complete(eq(reportId), anyString());
+        verify(reportService, never()).complete(eq(reportId), any(com.ivan_naumenko.repository_analyzer.report.artifact.ReportArtifacts.SynthesisResult.class), any());
         verify(reportService, never()).fail(eq(reportId), any(Throwable.class));
         verify(synthesisService, never()).synthesize(any(), any(), anyList());
-        verify(insightService, never()).save(anyInt(), any());
+        verify(insightService, never()).saveAll(org.mockito.ArgumentMatchers.anyMap());
         verify(eventService).complete(reportId);
     }
 

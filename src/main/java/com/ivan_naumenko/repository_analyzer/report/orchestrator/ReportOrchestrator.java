@@ -137,10 +137,7 @@ public class ReportOrchestrator {
             ReportGenerationData report = reportService.getGenerationData(
                     reportId
             );
-            List<CommitChangeSummary> commits = periodResolver.filter(
-                    report,
-                    changeService.load(report.taskId())
-            );
+            List<CommitChangeSummary> commits = reportService.loadCommits(reportId);
             Set<Integer> reusable = insightService.findReusableCommitIds(
                     report.taskId()
             );
@@ -343,6 +340,7 @@ public class ReportOrchestrator {
                     report.repositoryUrl()
             );
             List<CommitInsightResponse> saved = new ArrayList<>(unit.commits().size());
+            Map<Integer, CommitInsightDraft> toSave = new java.util.LinkedHashMap<>();
             for (CommitChangeSummary commit : unit.commits()) {
                 if (stopped.get()) {
                     return List.of();
@@ -353,9 +351,11 @@ public class ReportOrchestrator {
                             "Нет результата анализа коммита " + commit.commitHash()
                     );
                 }
-                insightService.save(commit.commitId(), draft);
                 saved.add(insightService.toResponse(commit, draft));
+                toSave.put(commit.commitId(), draft);
             }
+            if (stopped.get()) return List.of();
+            insightService.saveAll(toSave);
             return saved;
         }
 
@@ -414,7 +414,7 @@ public class ReportOrchestrator {
                         report.taskId(),
                         commits
                 );
-                String content = synthesisService.synthesize(
+                var result = synthesisService.synthesize(
                         report,
                         facts,
                         insights
@@ -422,7 +422,7 @@ public class ReportOrchestrator {
                 if (stopped.get()) {
                     return;
                 }
-                reportService.complete(report.reportId(), content);
+                reportService.complete(report.reportId(), result, facts);
                 stopped.set(true);
                 activeSessions.remove(report.reportId(), this);
                 publish(

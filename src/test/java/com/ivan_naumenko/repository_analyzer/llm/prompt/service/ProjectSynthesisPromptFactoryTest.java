@@ -41,7 +41,9 @@ class ProjectSynthesisPromptFactoryTest {
         assertTrue(prompt.contains("## Система и точки входа"));
         assertTrue(prompt.contains("## Находки"));
         assertTrue(prompt.contains("**[Подтверждено]**"));
-        assertTrue(prompt.contains("## Ограничения анализа"));
+        assertTrue(prompt.contains("limitations — отдельное поле JSON, вне sections"));
+        assertFalse(prompt.contains("## Ограничения анализа"));
+        assertTrue(prompt.contains("sections содержит ровно разделы из SECTION_TITLES_JSON"));
         assertTrue(prompt.contains("- Период: 2026-07-01 — 2026-07-20 (дней: 20, активных дней: 8)"));
         assertTrue(prompt.contains("- Коммитов: 12; слияний: 1; без смыслового анализа: 2"));
         assertTrue(prompt.contains("Чаще всего изменялись: src/App.java (коммитов: 5)"));

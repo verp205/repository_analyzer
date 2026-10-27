@@ -29,7 +29,7 @@ class CommitInsightPromptFactoryTest {
 
     @Test
     void buildsRoleNeutralJsonPrompt() {
-        when(serializer.serialize(any())).thenReturn("{\"commitHash\":\"aaaaaaa\"}");
+        when(serializer.serializeForAnalysis(any())).thenReturn("{\"commitHash\":\"aaaaaaa\"}");
         CommitInsightPromptFactory factory = new CommitInsightPromptFactory(serializer);
 
         String prompt = factory.buildSingle(context("a"));
@@ -45,7 +45,7 @@ class CommitInsightPromptFactoryTest {
 
     @Test
     void buildsBatchPromptWithContextArray() {
-        when(serializer.serialize(any())).thenReturn("{\"x\":1}");
+        when(serializer.serializeForAnalysis(any())).thenReturn("{\"x\":1}");
         CommitInsightPromptFactory factory = new CommitInsightPromptFactory(serializer);
 
         String prompt = factory.buildBatch(List.of(context("a"), context("b"), context("c")));
@@ -59,7 +59,7 @@ class CommitInsightPromptFactoryTest {
 
     @Test
     void includesPullRequestContextAndNeutralizesClosingTags() {
-        when(serializer.serialize(any())).thenReturn("{}");
+        when(serializer.serializeForAnalysis(any())).thenReturn("{}");
         CommitInsightPromptFactory factory = new CommitInsightPromptFactory(serializer);
         PullRequestContext pullRequest = new PullRequestContext(
                 ForgeProvider.GITHUB,

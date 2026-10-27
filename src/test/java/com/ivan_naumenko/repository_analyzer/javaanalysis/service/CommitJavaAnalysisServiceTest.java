@@ -76,11 +76,11 @@ class CommitJavaAnalysisServiceTest {
                 true,
                 List.of()
         );
-        when(gitService.readFileAtCommit(
+        when(gitService.readFilesAtCommit(
                 REPOSITORY_PATH,
                 COMMIT_HASH,
-                javaFile.newPath()
-        )).thenReturn(sourceCode);
+                List.of(javaFile.newPath())
+        )).thenReturn(java.util.Map.of(javaFile.newPath(), sourceCode));
         when(javaAnalysisService.analyze(javaFile.newPath(), sourceCode))
                 .thenReturn(analysis);
 

@@ -49,6 +49,9 @@ class AnalysisReportControllerTest {
     @Mock
     private ReportScopeService scopeService;
 
+    @Mock
+    private com.ivan_naumenko.repository_analyzer.report.artifact.ReportEvidenceService evidenceService;
+
     private MockMvc mockMvc;
 
     @BeforeEach
@@ -58,7 +61,7 @@ class AnalysisReportControllerTest {
                                 reportService,
                                 orchestrator,
                                 eventService,
-                                scopeService
+                                scopeService, evidenceService
                         )
                 )
                 .setControllerAdvice(new GlobalExceptionHandler())
